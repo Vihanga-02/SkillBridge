@@ -1,4 +1,4 @@
-# SkillBridge — Implementation Plan v2.1 (Final)
+# SkillBridge — Implementation Plan v2.2 (Final)
 **SDG 4 & 8 — Community Skill-Exchange & Micro-Learning Mobile App**
 
 Stack: React Native (Expo, TypeScript, Expo Router) · Firebase (Auth + Firestore + Storage + Cloud Functions) · Gemini API
@@ -31,6 +31,15 @@ This version merges the three feature lists your group members suggested into th
 | **Complete final folder & file structure** (§14) | Every file that will exist when the project is finished, with its owner — so nobody invents a parallel structure mid-build. |
 | Sections 13–20 renumbered to 14–21 | To make room for the design system section. |
 
+### Added in v2.2
+
+| Addition | Why |
+|---|---|
+| **Career Goals for learners** (§5.1.2) | Learners pick a career path (Software Engineer, Frontend Developer, …) and then choose skills from that goal's curated list. `skillsWanted` / `skillTagsWanted` stay the flat union M2/M3 already read — career goals are the richer source of truth underneath. |
+| Shared catalog `src/constants/careerGoals.ts` | Same pattern as `skills.ts` — one file, typed tags, no free text. M2/M3 can later key lesson/session progress off the stable `goal` tag. |
+| Discovery browse-by-goal + role filter | Discovery can filter by Category **or** Career goal, and by All / Teachers / Learners (replaces Top-rated / Newest sort). |
+| Skill taxonomy trimmed | Languages, Music, Crafts, Fitness removed — catalog focuses on Programming, Design, Business, Academic plus cloud/security/analysis skills that career goals need. |
+
 ---
 
 ## 1. Component Ownership (Final)
@@ -45,7 +54,7 @@ This version merges the three feature lists your group members suggested into th
 
 **Rules of engagement (agree on this in Week 1 — it prevents 80% of merge conflicts):**
 1. You may only edit **your own** service file and **your own** screens.
-2. Shared files (`src/types/index.ts`, `src/constants/skills.ts`, `src/constants/theme.ts`, `firestore.rules`, `app/_layout.tsx`, `src/components/ui/`) change **only via Pull Request**, and you post in the group chat before merging.
+2. Shared files (`src/types/index.ts`, `src/constants/skills.ts`, `src/constants/careerGoals.ts`, `src/constants/theme.ts`, `firestore.rules`, `app/_layout.tsx`, `src/components/ui/`) change **only via Pull Request**, and you post in the group chat before merging.
 3. If you need data another member owns, you **read** their collection directly (Firestore has no joins — reading is fine). You never **write** to a collection you don't own, except through the owner's service function.
 4. Never rename a Firestore field after Week 2 without telling the team. There is no compile-time check — a typo just silently returns zero results.
 
@@ -203,9 +212,11 @@ export async function register(email: string, password: string, name: string) {
     avatarUrl: '',
     location: '',
     skillsOffered: [],
-    skillsWanted: [],
     skillTagsOffered: [],               // flat array — the only field array-contains can query
-    skillTagsWanted: [],
+    careerGoals: [],                    // learner source of truth — see §5.1.2
+    extraSkillsWanted: [],              // wanted skills with no goal attached
+    skillsWanted: [],                   // DERIVED union of careerGoals + extraSkillsWanted
+    skillTagsWanted: [],                // DERIVED — M2/M3 read this, never write it
     verifiedSkills: [],
     credentialCount: 0,                 // denormalized count of the credentials subcollection
     ratingAvg: 0,
@@ -268,7 +279,7 @@ user + onboardingComplete  → redirect to /(tabs)/discovery
 | `app/(auth)/login.tsx` | Email, password, "Forgot password?", link to register |
 | `app/(auth)/register.tsx` | Name, email, password, confirm password, T&C checkbox |
 | `app/(auth)/forgot-password.tsx` | Email → `resetPassword()` → success state |
-| `app/(auth)/onboarding.tsx` | 3-step wizard: role → skills you can teach → skills you want to learn. Sets `onboardingComplete: true`. |
+| `app/(auth)/onboarding.tsx` | Wizard: role → (skills offered) → (**career goal**) → (skills wanted from that goal, or flat picker if skipped). Sets `onboardingComplete: true`. Role gates which steps appear. |
 
 ---
 
@@ -276,15 +287,16 @@ user + onboardingComplete  → redirect to /(tabs)/discovery
 
 ### 5.1 Component 1 — User Profile, Skill Portfolio & Discovery (Member 1)
 
-**Covers from the group's lists:** Smart User Profiles · Skill Portfolio · Skills offered/wanted · Experience level · Skill Listing & Discovery · Skill Marketplace (browse/search/filter by category & difficulty) · Skill Assessment / Verification Test · **Skill Credentials (certificates & proof)** · Achievement badges (display only).
+**Covers from the group's lists:** Smart User Profiles · Skill Portfolio · Skills offered/wanted · **Career Goals** · Experience level · Skill Listing & Discovery · Skill Marketplace (browse/search/filter by category, career goal & difficulty) · Skill Assessment / Verification Test · **Skill Credentials (certificates & proof)** · Achievement badges (display only).
 
 #### Screens
 
 | Route | What it does |
 |---|---|
-| `app/(tabs)/discovery.tsx` | **Home of the app.** Search bar (by name or skill) + horizontal category chips + difficulty filter + sort (rating / newest). `FlatList` of `UserCard`s. Empty state + skeleton loaders. |
-| `app/user/[id].tsx` | Public profile: avatar, name, bio, location, rating stars, verified-skill badges, skills offered (with level chips), **Credentials grouped by skill**, skills wanted, achievement badges, **Reviews list** (owned by M4), **Lessons by this user** (owned by M2), **Sessions offered** (owned by M3), and two CTA buttons: **Book a session** → M3, **Message** → M4. |
-| `app/profile/edit.tsx` | Edit name, bio, location, role, avatar upload, add/remove skills with level picker. |
+| `app/(tabs)/discovery.tsx` | **Home of the app.** Search bar (by name) + **Show: All / Teachers / Learners** + **Browse by: Category \| Career goal** chip rows + skill drill-down + difficulty filter. `FlatList` of `UserCard`s. Empty state + skeleton loaders. |
+| `app/user/[id].tsx` | Public profile: avatar, name, bio, location, rating stars, verified-skill badges, skills offered (with level chips), **Credentials grouped by skill**, **skills wanted grouped by career goal** (plus an "Other skills" tail), achievement badges, **Reviews list** (owned by M4), **Lessons by this user** (owned by M2), **Sessions offered** (owned by M3), and two CTA buttons: **Book a session** → M3, **Message** → M4. |
+| `app/profile/edit.tsx` | Edit name, bio, location, role, avatar upload, skills offered with level picker, **career goals** (add / edit skills per goal / remove) + **other skills wanted** (no-goal bucket). Role gates teach vs learn sections. |
+| `app/(auth)/onboarding.tsx` | Wizard: role → (skills offered, if can teach) → (**career goal**, if can learn) → (skills wanted from that goal, or flat picker if skipped). |
 | `app/profile/credentials/index.tsx` | **My Credentials** — the teacher's own manage list, grouped by skill. Add / edit / delete, visibility toggle, recount action. Only reachable when `role` is `teacher` or `both`. |
 | `app/profile/credentials/add.tsx` | Add or edit one credential: type, title, issuer, the skill it backs, dates, reference number, verification URL, file upload. |
 | `app/credential/[id].tsx` | **Credential viewer** — full screen. Images pinch-to-zoom; PDFs open in `WebBrowser`. Shows issuer, dates, reference number, and an "Open verification link" button when one was supplied. This is the screen learners land on. |
@@ -298,12 +310,15 @@ getUser(uid): Promise<User | null>
 subscribeToUser(uid, cb): Unsubscribe            // live profile
 updateProfile(uid, partial): Promise<void>       // always sets updatedAt: serverTimestamp()
 uploadAvatar(uid, localUri): Promise<string>     // → Storage, returns download URL
-searchUsersBySkill(skillTag, opts?): Promise<User[]>
-searchUsersByName(prefix): Promise<User[]>       // nameLower >= p, nameLower <= p+''
-listUsersByCategory(category): Promise<User[]>
-addSkillOffered(uid, { skill, level }): Promise<void>
-removeSkillOffered(uid, skill): Promise<void>
-addSkillWanted(uid, skill) / removeSkillWanted(uid, skill)
+searchUsersBySkill(skillTag, opts?): Promise<UserPage>
+searchUsersByName(prefix): Promise<UserPage>     // nameLower >= p, nameLower <= p+''
+listUsersByCategory(category): Promise<UserPage>
+listUsersByCareerGoal(goalTag): Promise<UserPage> // array-contains-any over skillsInGoal(goalTag)
+searchUsers(filters): Promise<UserPage>          // one entry for Discovery
+setSkillsOffered(uid, drafts): Promise<void>     // replaces whole offered set + skillTagsOffered
+setCareerGoals(uid, goals, extraSkillsWanted): Promise<void>
+  // writes careerGoals + extraSkillsWanted AND the derived skillsWanted / skillTagsWanted
+deriveWantedSkills(careerGoals, extraSkillsWanted)  // pure helper — also used by authService
 markSkillVerified(uid, skill): Promise<void>     // arrayUnion into verifiedSkills
 saveTestAttempt(uid, skill, questions, answers, score, passed): Promise<string>
 ```
@@ -313,6 +328,8 @@ saveTestAttempt(uid, skill, questions, answers, score, passed): Promise<string>
 - `skillTagsOffered: string[]` (lowercase, e.g. `["python","photoshop"]`) — for **querying**
 
 Both are updated in the same `updateDoc` call. Every other component queries the flat array.
+
+**Wanted skills are derived, not hand-edited** — see §5.1.2. M2 and M3 keep reading `skillsWanted` / `skillTagsWanted` exactly as before.
 
 ---
 
@@ -425,6 +442,86 @@ Document this limitation in the report and note Algolia/Typesense as future work
 
 #### Storage
 `avatars/{uid}.jpg` — resize with `expo-image-picker`'s `quality: 0.5` and `allowsEditing: true, aspect: [1,1]` before upload. Overwrite the same path so old avatars don't accumulate.
+
+---
+
+### 5.1.2 Career Goals — the layer on top of "skills to learn"
+
+**The problem this solves:** a flat "pick skills you want to learn" list gives learners no direction. Career goals let a learner say "I want to become a Software Engineer" and then pick from a curated skill curriculum for that path. Teachers who offer any of those skills still surface in Discovery — the same skill can back multiple goals (e.g. `sql` appears under Software Engineer, Backend Developer, Business Analyst and Data Scientist).
+
+#### Why this shape (not a rewrite of wanted-skills)
+
+Integration contract #13 already tells M2 (lessons) and M3 (sessions) they can default their filters to the learner's `skillsWanted` / `skillTagsWanted`. Those fields **must keep meaning "everything this learner wants to learn"** or that contract breaks silently. So:
+
+| Field | Who edits it | Meaning |
+|---|---|---|
+| `careerGoals[]` | Learner (onboarding + profile edit) | Source of truth — one entry per goal, with the subset of that goal's skills they chose |
+| `extraSkillsWanted[]` | Learner | Source of truth — skills wanted with **no** goal attached (hybrid model) |
+| `skillsWanted` / `skillTagsWanted` | **Never hand-edited** — recomputed by `deriveWantedSkills` on every write | Flat union M2/M3 already expect |
+
+```
+careerGoals[].skillTags  ──┐
+                           ├──► deriveWantedSkills() ──► skillsWanted / skillTagsWanted
+extraSkillsWanted[]      ──┘
+```
+
+Teach-only flows (`role: 'teacher'`) never see goal or wanted-skill UI. Learner-only flows never see skills-offered UI. `role: 'both'` sees both.
+
+#### Shared catalog — `src/constants/careerGoals.ts`
+
+Same pattern as `skills.ts`: a const array + typed `CareerGoalTag` + helpers. **No free-typed goal names.** Adding an 11th goal later is a one-line entry.
+
+| Goal tag | Skills (subset of `skills.ts`) |
+|---|---|
+| `software-engineer` | html-css, javascript, python, java, sql, git, data-structures-algorithms, rest-apis, system-design |
+| `frontend-developer` | html-css, javascript, react, git, ui-ux, figma |
+| `backend-developer` | python, java, sql, rest-apis, system-design, git, docker-devops |
+| `cloud-engineer` | cloud-computing, linux, networking, docker-devops, python, system-design |
+| `ui-ux-designer` | figma, ui-ux, photoshop, illustrator, video-editing |
+| `business-analyst` | business-analysis, sql, excel, digital-marketing, public-speaking, research-writing |
+| `data-scientist` | python, sql, mathematics, machine-learning, excel, research-writing |
+| `project-manager` | project-management, public-speaking, excel, entrepreneurship, digital-marketing |
+| `cybersecurity-engineer` | cybersecurity, networking, linux, python, cloud-computing |
+| `network-engineer` | networking, linux, cloud-computing, cybersecurity, system-design |
+
+Helpers: `careerGoalByTag(tag)`, `goalLabel(tag)`, `skillsInGoal(tag)`.
+
+#### Document shape on `users/{uid}`
+
+```ts
+type CareerGoal = {
+  goal: CareerGoalTag;   // stable key — M2/M3 can later key progress off this
+  label: string;         // denormalized display label from the catalog
+  skillTags: SkillTag[]; // the subset of skillsInGoal(goal) the learner actually picked
+};
+```
+
+A user has **at most one entry per goal tag** (same uniqueness pattern as `skillsOffered[].skill`).
+
+#### Onboarding flow
+
+Steps: `role` → (`offered`, if can teach) → (`goal`, if can learn) → (`wanted`, if can learn).
+
+- **Goal step:** single-select cards from `CAREER_GOALS` + "Skip — I'll add a goal later" (hybrid model allows zero goals).
+- **Wanted step:** if a goal was picked, show only that goal's skills + "Select all". If skipped, fall back to the category-filtered flat picker — those tags go into `extraSkillsWanted`.
+- `completeOnboarding` calls `deriveWantedSkills` so the flat fields are correct from day one.
+
+#### Profile edit
+
+- **Career goals** — a card per entry (label + chosen skill chips + Edit skills / Remove). "+ Add a career goal" opens the goal's full skill multi-select + Select all.
+- **Other skills you want to learn** — flat chip picker scoped to `extraSkillsWanted` only.
+- Save calls `setCareerGoals(uid, draftGoals, draftExtra)` — never `setSkillsWanted` directly (that helper no longer exists as a public write path).
+
+#### Discovery
+
+- **Show:** All / Teachers / Learners (Teachers = `teacher` + `both`; Learners = `learner` + `both`). Replaces the old Top-rated / Newest sort toggle.
+- **Browse by:** Category | Career goal — mutually exclusive at the UI. Career-goal mode shows the 10 goal chips, then that goal's skills as a second row (mirrors category → skill drill-down). `listUsersByCareerGoal` runs `array-contains-any` on `skillTagsOffered` against `skillsInGoal(goalTag)`.
+
+#### What M2 / M3 need to know
+
+- **Keep reading `skillsWanted` / `skillTagsWanted`.** No change required for default filters (contract #13).
+- **Optional later:** key lesson/session progress or "path" UI off `careerGoals[].goal`. The tag is stable and comes from `careerGoals.ts` — do not invent parallel IDs.
+- **Do not write** `careerGoals`, `extraSkillsWanted`, `skillsWanted`, or `skillTagsWanted`. Member 1 owns those writes via `setCareerGoals` / `completeOnboarding`.
 
 ---
 
@@ -667,7 +764,7 @@ deletePost(postId)                          // author only
 
 ## 6. Integration Map — Exactly Where Components Touch
 
-These are your **integration contracts**. Agree on them in Week 1; they're what Week 6 integration actually tests. Seventeen touch points, and every one of them is a place where two members' assumptions can quietly disagree.
+These are your **integration contracts**. Agree on them in Week 1; they're what Week 6 integration actually tests. Eighteen touch points, and every one of them is a place where two members' assumptions can quietly disagree.
 
 | # | From → To | Touch point | Contract |
 |---|---|---|---|
@@ -683,34 +780,58 @@ These are your **integration contracts**. Agree on them in Week 1; they're what 
 | 10 | **M4 → M3** | Review guard | `submitReview` reads and updates `bookings/{id}`. M3 must guarantee `status` and the two `reviewedBy*` flags exist on **every** booking doc from creation. |
 | 11 | **M2 → M4** | Achievement post | On `completeLesson`, optionally auto-create a feed post (`type: 'achievement'`). M2 calls `postService.createPost` — M2 does not write to `posts` directly. |
 | 12 | **M1 ↔ M2 ↔ M3** | Skill taxonomy | All three filter by `skillTag` and `category`. **All values come from `src/constants/skills.ts`.** Free-typed tags are forbidden — one typo silently breaks discovery, the feed, and session browse at once. |
-| 13 | **M1 → M2/M3** | `skillsWanted` | Feed and session browse can default their filter to the user's `skillsWanted` — the cheapest possible "personalisation" and a good report talking point. |
+| 13 | **M1 → M2/M3** | `skillsWanted` / `skillTagsWanted` | Feed and session browse can default their filter to these fields. They mean **"everything this learner wants to learn"** — a derived union of `careerGoals[].skillTags` + `extraSkillsWanted` (§5.1.2). M2/M3 **read only**; never write them, and never assume they were typed by hand. |
 | 14 | **All → shared UI** | `src/components/ui/` | `Avatar`, `SkillChip`, `RatingStars`, `Button`, `Input`, `Card`, `EmptyState`, `LoadingState`, `ErrorState`, `ScreenHeader`, `CredentialCard`. Built Week 1 by Member 4 (usability role); everyone else consumes them. |
 | 15 | **M1 → M3** | Credentials on the booking path | `session/[id]` and `booking/[id]` show the teacher's `credentialCount` as a chip that deep-links to `user/{teacherId}#credentials`. M3 reads the denormalized counter only — M3 never queries the credentials subcollection. |
 | 16 | **M1 → M1** | Credential ↔ skill link | A credential's `skillTag` must be one of the owner's `skillTagsOffered`. If a skill is removed in `profile/edit`, its credentials are **not** deleted — they're shown in an "Unlinked" group in the owner's own list, so evidence is never silently destroyed by an unrelated edit. |
 | 17 | **All → theme** | `src/constants/theme.ts` | Nobody writes a raw hex value, pixel value or font size in a screen file. Every colour, space, radius and text style comes from the theme — see §13. This is what makes four independently built components look like one app. |
+| 18 | **M1 → M2/M3** | `careerGoals[].goal` | Optional later: key path/progress UI off the stable goal tag from `src/constants/careerGoals.ts`. Do not invent parallel goal IDs. Until then, contract #13 is enough. |
 
 ### 6.1 `src/constants/skills.ts` — build this on Day 3, before anyone writes a query
 
 ```ts
 export const CATEGORIES = [
-  'Programming', 'Design', 'Languages', 'Music',
-  'Business', 'Academic', 'Crafts', 'Fitness',
+  'Programming', 'Design', 'Business', 'Academic',
 ] as const;
 
 export const SKILLS: { tag: string; label: string; category: Category }[] = [
   { tag: 'python',      label: 'Python',           category: 'Programming' },
   { tag: 'javascript',  label: 'JavaScript',       category: 'Programming' },
-  { tag: 'photoshop',   label: 'Photoshop',        category: 'Design' },
+  { tag: 'react',       label: 'React',            category: 'Programming' },
+  { tag: 'git',         label: 'Git & Version Control', category: 'Programming' },
+  { tag: 'cloud-computing', label: 'Cloud Computing', category: 'Programming' },
   { tag: 'figma',       label: 'Figma',            category: 'Design' },
-  { tag: 'spoken-english', label: 'Spoken English', category: 'Languages' },
-  { tag: 'guitar',      label: 'Guitar',           category: 'Music' },
-  // …aim for ~30 total. tag = lowercase-kebab, ALWAYS.
+  { tag: 'ui-ux',       label: 'UI/UX Design',     category: 'Design' },
+  { tag: 'excel',       label: 'Excel & Spreadsheets', category: 'Business' },
+  { tag: 'project-management', label: 'Project Management', category: 'Business' },
+  { tag: 'mathematics', label: 'Mathematics',      category: 'Academic' },
+  // …~30 total across the four categories. tag = lowercase-kebab, ALWAYS.
 ];
 
 export const LEVELS = ['beginner', 'intermediate', 'advanced'] as const;
 ```
 
 Every picker, chip, and filter in all four components reads from this file. **This single file prevents the most common Firestore group-project bug.**
+
+Languages, Music, Crafts and Fitness were dropped in v2.2 — the catalog stays focused on career-relevant skills that the career-goal curricula actually use.
+
+### 6.2 `src/constants/careerGoals.ts` — build alongside skills.ts
+
+```ts
+export const CAREER_GOALS = [
+  {
+    tag: 'software-engineer',
+    label: 'Software Engineer',
+    skillTags: ['html-css', 'javascript', 'python', 'java', 'sql', 'git', /* … */],
+  },
+  // …10 goals total — full table in §5.1.2
+] as const;
+
+export type CareerGoalTag = (typeof CAREER_GOALS)[number]['tag'];
+// helpers: careerGoalByTag, goalLabel, skillsInGoal
+```
+
+Same rule as skills: **no free-typed goal tags.** M2/M3 that later adopt goals for progress tracking import from this file only.
 
 ---
 
@@ -732,8 +853,10 @@ Legend: `T` = Firestore `Timestamp` · **denorm** = copied from another doc for 
 | `location` | string | e.g. "NSBM, Homagama" |
 | `skillsOffered` | `{ skill, label, level, verified, credentialCount }[]` | **display** shape |
 | `skillTagsOffered` | string[] | **query** shape — `array-contains` |
-| `skillsWanted` | `{ skill, label }[]` | |
-| `skillTagsWanted` | string[] | |
+| `careerGoals` | `{ goal, label, skillTags }[]` | **learner source of truth** — see §5.1.2. At most one entry per `goal` tag from `careerGoals.ts` |
+| `extraSkillsWanted` | string[] | **learner source of truth** — wanted skill tags with no goal attached |
+| `skillsWanted` | `{ skill, label }[]` | **derived** display union of the two sources above — M2/M3 read this |
+| `skillTagsWanted` | string[] | **derived** query union — M2/M3 read this; never hand-edit |
 | `verifiedSkills` | string[] | tags passed via the skill test — *the app tested them* |
 | `credentialCount` | number | denormalized size of the `credentials` subcollection, so Discovery cards need no extra read |
 | `ratingAvg` | number | 0–5, **written only by M4's transaction** |
@@ -1548,7 +1671,7 @@ skillbridge/
     │   │   ├── login.tsx                   [S]
     │   │   ├── register.tsx                [S]
     │   │   ├── forgot-password.tsx         [S]
-    │   │   └── onboarding.tsx              [S]  3-step: role -> skills offered -> skills wanted
+    │   │   └── onboarding.tsx              [S]  role -> offered -> career goal -> wanted skills
     │   │
     │   ├── (tabs)/
     │   │   ├── _layout.tsx                 [S]  4 tabs + assistant FAB
@@ -1674,11 +1797,13 @@ skillbridge/
     │   │
     │   ├── constants/
     │   │   ├── theme.ts                    [S]  §13 — colours, spacing, radius, type, shadow
-    │   │   ├── skills.ts                   [S]  §6.1 — THE shared taxonomy
+    │   │   ├── skills.ts                   [S]  §6.1 — THE shared skill taxonomy
+    │   │   ├── careerGoals.ts              [S]  §6.2 / §5.1.2 — career goal catalog + helpers
+    │   │   ├── skillTestBank.ts            [M1] offline fallback questions for skill tests
     │   │   └── config.ts                   [S]  file size caps, page sizes, AI daily quota
     │   │
     │   ├── types/
-    │   │   └── index.ts                    [S]  User, Credential, Lesson, LessonProgress,
+    │   │   └── index.ts                    [S]  User, CareerGoal, Credential, Lesson, LessonProgress,
     │   │                                        Session, Booking, Review, Chat, Message, Post
     │   │
     │   └── utils/
@@ -1743,19 +1868,19 @@ so a mistyped tag becomes a *compile* error instead of a query that silently ret
 
 | Week | Whole team | Member 1 | Member 2 | Member 3 | Member 4 |
 |---|---|---|---|---|---|
-| **1** | Firebase project, repo, Expo app, **Auth built together**, `types/index.ts` + `constants/skills.ts` + **`theme.ts` (§13) agreed and merged before any screen** | Onboarding wizard | — | — | Shared UI components, built against the theme |
-| **2** | Data model frozen. Tab shell wired. | `userService` + discovery list | `lessonService` + feed list | `sessionService` + browse list | `chatService` + chat list |
-| **3** | Mid-point demo to each other (raw UI, real data) | Profile detail + edit | Lesson viewer + create | Session create + detail | Chat screen (GiftedChat) |
-| **4** | **Deploy real security rules.** Re-test every screen. | Avatar upload + search/filters | Media upload + flashcards | `requestBooking` transaction + calendar | Reviews + rating transaction |
-| **5** | Create all composite indexes. Freeze new features. | **Credentials (§5.1.1): service, add/manage, viewer, profile section** + skill test screen | Quiz runner + progress dashboard | Approve/decline/complete flow | Community feed + posts |
-| **6** | **Integration week** — wire all 17 touch points in §6. Full journey end-to-end. **Theme audit: grep every screen file for a raw `#` hex value and remove it.** | | | | |
+| **1** | Firebase project, repo, Expo app, **Auth built together**, `types/index.ts` + `constants/skills.ts` + `constants/careerGoals.ts` + **`theme.ts` (§13) agreed and merged before any screen** | Onboarding wizard (incl. career goal step) | — | — | Shared UI components, built against the theme |
+| **2** | Data model frozen. Tab shell wired. | `userService` + discovery list (category + career-goal browse) | `lessonService` + feed list | `sessionService` + browse list | `chatService` + chat list |
+| **3** | Mid-point demo to each other (raw UI, real data) | Profile detail + edit (career goals + skills) | Lesson viewer + create | Session create + detail | Chat screen (GiftedChat) |
+| **4** | **Deploy real security rules.** Re-test every screen. | Avatar upload + search/filters (All / Teachers / Learners) | Media upload + flashcards | `requestBooking` transaction + calendar | Reviews + rating transaction |
+| **5** | Create all composite indexes. Freeze new features. | **Credentials (§5.1.1)** + **Career goals (§5.1.2)** polish + skill test screen | Quiz runner + progress dashboard | Approve/decline/complete flow | Community feed + posts |
+| **6** | **Integration week** — wire all 18 touch points in §6. Full journey end-to-end. **Theme audit: grep every screen file for a raw `#` hex value and remove it.** | | | | |
 | **7** | AI features (§11) + **usability testing with 5 outside users** + rule-breaking security tests | Feature 1 & 2 (7 only if time) | Feature 3 & 4 | Feature 5 | Feature 6 + assistant |
 | **8** | Polish, seed demo data, build APK, write report, rehearse the demo twice | | | | |
 
 **Weeks 6–8 are non-negotiable.** Every group underestimates integration. If you're behind in Week 5, cut features (session covers, chat images, post images, video upload) — never cut integration week.
 
 ### Demo journey to rehearse (the thread through all four components)
-Register → onboarding picks skills → discovery finds a Python teacher → open their profile (rating + verified badge + their lessons) → **open one of their credentials and see the actual certificate** → **book a session** → *(switch to teacher account)* approve it → chat about it → mark completed → *(back to learner)* leave a 5-star review → rating updates live on the profile → open a lesson → take the AI-generated quiz → post the achievement to the community feed.
+Register → onboarding picks a **career goal** + skills → discovery finds a Python teacher (Browse by Career goal: Software Engineer, or Show: Teachers) → open their profile (rating + verified badge + **goal-grouped wanted skills** + their lessons) → **open one of their credentials and see the actual certificate** → **book a session** → *(switch to teacher account)* approve it → chat about it → mark completed → *(back to learner)* leave a 5-star review → rating updates live on the profile → open a lesson → take the AI-generated quiz → post the achievement to the community feed.
 
 The credential step is short but it's the one that makes the trust story concrete — don't skip it in the demo.
 
@@ -1834,7 +1959,7 @@ Tick all of these before you say your component is finished:
 - [ ] My queries work **after** the real security rules are deployed (not just in test mode)
 - [ ] Required composite indexes are created in the console
 - [ ] I only read (never write) collections owned by other members
-- [ ] All my skill tags/categories come from `constants/skills.ts`
+- [ ] All my skill tags/categories come from `constants/skills.ts` (and career goal tags from `constants/careerGoals.ts` if I touch goals)
 - [ ] **No raw hex, pixel or font-size value appears in any file I own** — everything comes from `theme.ts` (§13)
 - [ ] **Every status I display uses `StatusBadge`** (colour *and* a word), never colour alone
 - [ ] Every integration point in §6 that touches me is wired and tested against another member's real screen
@@ -1846,6 +1971,10 @@ Tick all of these before you say your component is finished:
 - [ ] A learner on someone else's profile can open a credential and see the actual file
 - [ ] Deleting a credential removes the Storage file, the document, **and** decrements both counters
 - [ ] A `private` credential is invisible to other users **when queried directly via the SDK**, not just hidden in the UI
+- [ ] Career-goal / wanted-skill UI is hidden for `role: 'teacher'`; skills-offered UI is hidden for `role: 'learner'`
+- [ ] Saving career goals recomputes `skillsWanted` / `skillTagsWanted` via `deriveWantedSkills` — M2/M3 can still default filters off those fields
+- [ ] Discovery Browse-by Career goal returns teachers who offer any skill in that goal's curriculum
+- [ ] Onboarding allows skipping the goal step; skipped picks land in `extraSkillsWanted`
 
 ---
 
@@ -1899,4 +2028,4 @@ node scripts/seed.js
 
 > SkillBridge is a peer-to-peer skill-exchange app for campus communities, built with React Native (Expo) and Firebase. Learners discover peers by skill, inspect the certificates and credentials a teacher has attached to each skill they offer, study 5–15 minute micro-lessons with AI-generated quizzes and flashcards, book one-to-one or group sessions, chat in real time, and rate each other afterwards — building a reputation system that makes free peer teaching trustworthy. It addresses **SDG 4 (Quality Education)** by making learning free and peer-driven, and **SDG 8 (Decent Work)** by letting people trade skills instead of money.
 >
-> The architecture is deliberately serverless: Firestore security rules replace an Express validation layer, Firestore transactions replace SQL constraints for seat allocation and rating aggregation, and a single Cloud Function proxies the Gemini API so no key ships in the client. Four members each own one vertical slice — Discovery, Micro-Learning, Sessions, and Community — connected through seventeen documented integration points, one shared skill taxonomy, and a single design system built on a 60:30:10 colour ratio with WCAG AA-verified contrast throughout.
+> The architecture is deliberately serverless: Firestore security rules replace an Express validation layer, Firestore transactions replace SQL constraints for seat allocation and rating aggregation, and a single Cloud Function proxies the Gemini API so no key ships in the client. Four members each own one vertical slice — Discovery, Micro-Learning, Sessions, and Community — connected through eighteen documented integration points, one shared skill taxonomy (plus a career-goal catalog layered on top for learners), and a single design system built on a 60:30:10 colour ratio with WCAG AA-verified contrast throughout.

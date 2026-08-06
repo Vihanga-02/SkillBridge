@@ -12,12 +12,8 @@
 export const CATEGORIES = [
   'Programming',
   'Design',
-  'Languages',
-  'Music',
   'Business',
   'Academic',
-  'Crafts',
-  'Fitness',
 ] as const;
 
 export type Category = (typeof CATEGORIES)[number];
@@ -40,6 +36,16 @@ export const SKILLS = [
   { tag: 'java', label: 'Java', category: 'Programming' },
   { tag: 'sql', label: 'SQL & Databases', category: 'Programming' },
   { tag: 'html-css', label: 'HTML & CSS', category: 'Programming' },
+  { tag: 'git', label: 'Git & Version Control', category: 'Programming' },
+  { tag: 'linux', label: 'Linux / Command Line', category: 'Programming' },
+  { tag: 'data-structures-algorithms', label: 'Data Structures & Algorithms', category: 'Programming' },
+  { tag: 'rest-apis', label: 'REST APIs', category: 'Programming' },
+  { tag: 'system-design', label: 'System Design', category: 'Programming' },
+  { tag: 'cloud-computing', label: 'Cloud Computing', category: 'Programming' },
+  { tag: 'networking', label: 'Computer Networking', category: 'Programming' },
+  { tag: 'cybersecurity', label: 'Cybersecurity Fundamentals', category: 'Programming' },
+  { tag: 'docker-devops', label: 'Docker & DevOps', category: 'Programming' },
+  { tag: 'machine-learning', label: 'Machine Learning', category: 'Programming' },
 
   // Design
   { tag: 'figma', label: 'Figma', category: 'Design' },
@@ -48,39 +54,19 @@ export const SKILLS = [
   { tag: 'ui-ux', label: 'UI/UX Design', category: 'Design' },
   { tag: 'video-editing', label: 'Video Editing', category: 'Design' },
 
-  // Languages
-  { tag: 'spoken-english', label: 'Spoken English', category: 'Languages' },
-  { tag: 'sinhala', label: 'Sinhala', category: 'Languages' },
-  { tag: 'tamil', label: 'Tamil', category: 'Languages' },
-  { tag: 'japanese', label: 'Japanese', category: 'Languages' },
-  { tag: 'french', label: 'French', category: 'Languages' },
-
-  // Music
-  { tag: 'guitar', label: 'Guitar', category: 'Music' },
-  { tag: 'piano', label: 'Piano', category: 'Music' },
-  { tag: 'singing', label: 'Singing', category: 'Music' },
-  { tag: 'drums', label: 'Drums', category: 'Music' },
-
   // Business
   { tag: 'public-speaking', label: 'Public Speaking', category: 'Business' },
   { tag: 'digital-marketing', label: 'Digital Marketing', category: 'Business' },
   { tag: 'entrepreneurship', label: 'Entrepreneurship', category: 'Business' },
   { tag: 'excel', label: 'Excel & Spreadsheets', category: 'Business' },
+  { tag: 'business-analysis', label: 'Business Analysis', category: 'Business' },
+  { tag: 'project-management', label: 'Project Management', category: 'Business' },
 
   // Academic
   { tag: 'mathematics', label: 'Mathematics', category: 'Academic' },
   { tag: 'physics', label: 'Physics', category: 'Academic' },
   { tag: 'accounting', label: 'Accounting', category: 'Academic' },
   { tag: 'research-writing', label: 'Research Writing', category: 'Academic' },
-
-  // Crafts
-  { tag: 'photography', label: 'Photography', category: 'Crafts' },
-  { tag: 'cooking', label: 'Cooking', category: 'Crafts' },
-  { tag: 'drawing', label: 'Drawing & Sketching', category: 'Crafts' },
-
-  // Fitness
-  { tag: 'yoga', label: 'Yoga', category: 'Fitness' },
-  { tag: 'cricket', label: 'Cricket', category: 'Fitness' },
 ] as const satisfies readonly { tag: string; label: string; category: Category }[];
 
 /** A mistyped tag becomes a compile error instead of a query that returns nothing. */

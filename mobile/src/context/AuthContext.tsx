@@ -59,7 +59,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    // Drop any previous user's profile immediately so a returning login never
+    // routes on stale `onboardingComplete` (or a null profile treated as incomplete).
+    setProfile(null);
     setProfileResolved(false);
+    setError(null);
 
     const unsubscribe = onSnapshot(
       doc(db, 'users', uid),

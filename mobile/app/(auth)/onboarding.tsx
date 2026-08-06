@@ -9,6 +9,7 @@ import { Chip } from '@/components/ui/Chip';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { Notice } from '@/components/ui/Notice';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
+import { CAREER_GOALS, skillsInGoal, type CareerGoalTag } from '@/constants/careerGoals';
 import { ONBOARDING } from '@/constants/config';
 import {
   CATEGORIES,
@@ -26,7 +27,7 @@ import { completeOnboarding, logout } from '@/services/authService';
 import type { UserRole } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
 
-type StepId = 'role' | 'offered' | 'wanted';
+type StepId = 'role' | 'offered' | 'goal' | 'wanted';
 
 const ROLE_OPTIONS: {
   value: UserRole;
@@ -59,6 +60,8 @@ export default function OnboardingScreen() {
 
   const [role, setRole] = useState<UserRole>('both');
   const [offered, setOffered] = useState<Record<string, Level>>({});
+  const [goal, setGoal] = useState<CareerGoalTag | null>(null);
+  const [goalSkills, setGoalSkills] = useState<SkillTag[]>([]);
   const [wanted, setWanted] = useState<SkillTag[]>([]);
   const [category, setCategory] = useState<Category | 'All'>('All');
   const [stepIndex, setStepIndex] = useState(0);
@@ -66,13 +69,18 @@ export default function OnboardingScreen() {
   const [submitting, setSubmitting] = useState(false);
 
   // A learner is never asked what they teach, and a teacher is never asked what
-  // they want to learn — so the wizard is 2 or 3 steps depending on the role.
+  // they want to learn — so the wizard is 2 to 4 steps depending on the role.
   const steps = useMemo<StepId[]>(() => {
     const list: StepId[] = ['role'];
     if (role !== 'learner') list.push('offered');
-    if (role !== 'teacher') list.push('wanted');
+    if (role !== 'teacher') list.push('goal', 'wanted');
     return list;
   }, [role]);
+
+  // "Wanted" narrows to the chosen goal's curriculum, or falls back to the flat
+  // picker (→ extraSkillsWanted) once a goal is skipped.
+  const goalSkillOptions = goal ? skillsInGoal(goal) : [];
+  const wantedCount = goal ? goalSkills.length : wanted.length;
 
   const step = steps[Math.min(stepIndex, steps.length - 1)];
   const isLastStep = stepIndex >= steps.length - 1;
@@ -103,13 +111,40 @@ export default function OnboardingScreen() {
     );
   }
 
+  function selectGoal(tag: CareerGoalTag) {
+    setFormError(null);
+    setGoal((previous) => (previous === tag ? null : tag));
+    setGoalSkills([]);
+  }
+
+  function skipGoal() {
+    setFormError(null);
+    setGoal(null);
+    setGoalSkills([]);
+    setStepIndex((index) => index + 1);
+  }
+
+  function toggleGoalSkill(tag: SkillTag) {
+    setFormError(null);
+    setGoalSkills((previous) =>
+      previous.includes(tag) ? previous.filter((t) => t !== tag) : [...previous, tag]
+    );
+  }
+
+  function selectAllGoalSkills() {
+    setFormError(null);
+    setGoalSkills(goalSkillOptions.map((s) => s.tag));
+  }
+
   function onNext() {
     if (step === 'offered' && offeredTags.length < ONBOARDING.minSkillsOffered) {
       setFormError('Pick at least one skill you could teach.');
       return;
     }
-    if (step === 'wanted' && wanted.length < ONBOARDING.minSkillsWanted) {
-      setFormError('Pick at least one skill you want to learn.');
+    if (step === 'wanted' && wantedCount < ONBOARDING.minSkillsWanted) {
+      setFormError(
+        goal ? 'Pick at least one skill from your goal.' : 'Pick at least one skill you want to learn.'
+      );
       return;
     }
 
@@ -130,7 +165,8 @@ export default function OnboardingScreen() {
       await completeOnboarding(firebaseUser, {
         role,
         skillsOffered: offeredTags.map((skill) => ({ skill, level: offered[skill] })),
-        skillsWanted: wanted,
+        careerGoal: goal ? { goal, skillTags: goalSkills } : null,
+        extraSkillsWanted: goal ? [] : wanted,
       });
       // The live profile listener flips onboardingComplete, and the root layout
       // guard swaps the auth group for the tabs.
@@ -261,25 +297,94 @@ export default function OnboardingScreen() {
           </View>
         ) : null}
 
+        {step === 'goal' ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>What&apos;s your career goal?</Text>
+            <Text style={styles.sectionHint}>
+              Pick one and we&apos;ll suggest the skills that matter most for it. You can add more
+              goals later from your profile.
+            </Text>
+
+            {CAREER_GOALS.map((option) => {
+              const selected = goal === option.tag;
+              return (
+                <Card
+                  key={option.tag}
+                  onPress={() => selectGoal(option.tag)}
+                  accessibilityLabel={option.label}
+                  style={selected ? styles.roleCardSelected : undefined}>
+                  <View style={styles.roleRow}>
+                    <View style={[styles.roleIcon, selected && styles.roleIconSelected]}>
+                      <Ionicons
+                        name="flag-outline"
+                        size={sizes.iconMd}
+                        color={selected ? colors.accent : colors.inkMuted}
+                      />
+                    </View>
+                    <View style={styles.roleText}>
+                      <Text style={styles.roleTitle}>{option.label}</Text>
+                    </View>
+                    <Ionicons
+                      name={selected ? 'radio-button-on' : 'radio-button-off'}
+                      size={sizes.iconLg}
+                      color={selected ? colors.accent : colors.inkFaint}
+                    />
+                  </View>
+                </Card>
+              );
+            })}
+
+            <Pressable
+              onPress={skipGoal}
+              hitSlop={spacing.sm}
+              accessibilityRole="button"
+              accessibilityLabel="Skip, I'll add a goal later">
+              <Text style={styles.skipText}>Skip — I&apos;ll add a goal later</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
         {step === 'wanted' ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>What do you want to learn?</Text>
             <Text style={styles.sectionHint}>
-              We use this to pre-filter the lesson feed and session browse for you.
+              {goal
+                ? 'These are the skills that build toward your goal. Pick as many as you like.'
+                : "We use this to pre-filter the lesson feed and session browse for you."}
             </Text>
 
-            <CategoryFilter value={category} onChange={setCategory} />
+            {goal ? (
+              <>
+                <View style={styles.selectAllRow}>
+                  <Button label="Select all" variant="secondary" onPress={selectAllGoalSkills} />
+                </View>
+                <View style={styles.chipWrap}>
+                  {goalSkillOptions.map((skill) => (
+                    <Chip
+                      key={skill.tag}
+                      label={skill.label}
+                      selected={goalSkills.includes(skill.tag)}
+                      onPress={() => toggleGoalSkill(skill.tag)}
+                    />
+                  ))}
+                </View>
+              </>
+            ) : (
+              <>
+                <CategoryFilter value={category} onChange={setCategory} />
 
-            <View style={styles.chipWrap}>
-              {visibleSkills.map((skill) => (
-                <Chip
-                  key={skill.tag}
-                  label={skill.label}
-                  selected={wanted.includes(skill.tag)}
-                  onPress={() => toggleWanted(skill.tag)}
-                />
-              ))}
-            </View>
+                <View style={styles.chipWrap}>
+                  {visibleSkills.map((skill) => (
+                    <Chip
+                      key={skill.tag}
+                      label={skill.label}
+                      selected={wanted.includes(skill.tag)}
+                      onPress={() => toggleWanted(skill.tag)}
+                    />
+                  ))}
+                </View>
+              </>
+            )}
           </View>
         ) : null}
       </ScrollView>
@@ -399,6 +504,15 @@ const styles = StyleSheet.create({
   roleDescription: {
     ...type.caption,
     color: colors.inkMuted,
+  },
+  skipText: {
+    ...type.label,
+    color: colors.accent,
+    textAlign: 'center',
+    paddingVertical: spacing.sm,
+  },
+  selectAllRow: {
+    flexDirection: 'row',
   },
   categoryRow: {
     gap: spacing.sm,

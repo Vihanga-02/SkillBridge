@@ -148,55 +148,6 @@ export const SKILL_TEST_BANK: Partial<Record<SkillTag, TestQuestion[]>> = {
       1
     ),
   ],
-  'spoken-english': [
-    mcq(
-      'Choose the correct sentence.',
-      ["She don't like coffee.", "She doesn't likes coffee.", "She doesn't like coffee.", 'She not like coffee.'],
-      2
-    ),
-    mcq(
-      'Which is the past tense of "teach"?',
-      ['teached', 'taught', 'teachen', 'teaching'],
-      1
-    ),
-    mcq(
-      'Pick the correct question form.',
-      ['Where you are going?', 'Where are you going?', 'Where going you are?', 'Where you going are?'],
-      1
-    ),
-    mcq(
-      'Which word is a synonym for "improve"?',
-      ['worsen', 'enhance', 'ignore', 'delay'],
-      1
-    ),
-  ],
-  guitar: [
-    mcq(
-      'How many strings does a standard guitar have?',
-      ['4', '5', '6', '7'],
-      2
-    ),
-    mcq(
-      'What is standard tuning, from the lowest string?',
-      ['E A D G B E', 'D A D G A D', 'C G D A E B', 'E A D G C F'],
-      0
-    ),
-    mcq(
-      'What does a capo do?',
-      ['Mutes the strings', 'Raises the pitch of every string', 'Tunes the guitar', 'Amplifies the sound'],
-      1
-    ),
-    mcq(
-      'A barre chord is played by…',
-      [
-        'Strumming one string',
-        'Pressing several strings with one finger',
-        'Muting the low E string',
-        'Playing only open strings',
-      ],
-      1
-    ),
-  ],
 };
 
 export const hasTestFor = (skillTag: string): boolean => skillTag in SKILL_TEST_BANK;

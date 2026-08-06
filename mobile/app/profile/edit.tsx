@@ -14,12 +14,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
 import { Chip } from '@/components/ui/Chip';
 import { ChipSelect } from '@/components/ui/ChipSelect';
 import { Input } from '@/components/ui/Input';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { Notice } from '@/components/ui/Notice';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
+import { CAREER_GOALS, careerGoalByTag, skillsInGoal, type CareerGoalTag } from '@/constants/careerGoals';
 import { FILE_LIMITS, TEXT_LIMITS } from '@/constants/config';
 import {
   CATEGORIES,
@@ -34,15 +36,12 @@ import {
 import { colors, radius, sizes, spacing, type } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useMediaPicker } from '@/hooks/useMediaPicker';
-import {
-  setSkillsOffered,
-  setSkillsWanted,
-  updateProfile,
-  uploadAvatar,
-} from '@/services/userService';
+import { setCareerGoals, setSkillsOffered, updateProfile, uploadAvatar } from '@/services/userService';
 import type { User, UserRole } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
 import { validateBio, validateName, type FieldError } from '@/utils/validation';
+
+type DraftGoal = { goal: CareerGoalTag; skillTags: SkillTag[] };
 
 const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
   { value: 'both', label: 'Teach & learn' },
@@ -71,9 +70,13 @@ function EditProfileForm({ profile, onSaved }: { profile: User; onSaved: () => P
   const [offered, setOffered] = useState<Record<string, Level>>(() =>
     Object.fromEntries(profile.skillsOffered.map((skill) => [skill.skill, skill.level]))
   );
-  const [wanted, setWanted] = useState<SkillTag[]>(() =>
-    profile.skillsWanted.map((skill) => skill.skill)
+  const [draftGoals, setDraftGoals] = useState<DraftGoal[]>(() =>
+    (profile.careerGoals ?? []).map((g) => ({ goal: g.goal, skillTags: g.skillTags }))
   );
+  const [extraWanted, setExtraWanted] = useState<SkillTag[]>(() => profile.extraSkillsWanted ?? []);
+  const [addingGoal, setAddingGoal] = useState(false);
+  const [editingGoal, setEditingGoal] = useState<CareerGoalTag | null>(null);
+  const [editingSkills, setEditingSkills] = useState<SkillTag[]>([]);
 
   const [category, setCategory] = useState<Category | 'All'>('All');
   const [errors, setErrors] = useState<Record<string, FieldError>>({});
@@ -85,6 +88,9 @@ function EditProfileForm({ profile, onSaved }: { profile: User; onSaved: () => P
   const canLearn = role === 'learner' || role === 'both';
   const offeredTags = Object.keys(offered) as SkillTag[];
   const visibleSkills = category === 'All' ? SKILLS : SKILLS.filter((s) => s.category === category);
+  const availableGoalsToAdd = CAREER_GOALS.filter(
+    (g) => !draftGoals.some((d) => d.goal === g.tag)
+  );
 
   function onRoleChange(next: UserRole) {
     setRole(next);
@@ -101,10 +107,64 @@ function EditProfileForm({ profile, onSaved }: { profile: User; onSaved: () => P
     });
   }
 
-  function toggleWanted(tag: SkillTag) {
-    setWanted((previous) =>
+  function toggleExtraWanted(tag: SkillTag) {
+    setExtraWanted((previous) =>
       previous.includes(tag) ? previous.filter((t) => t !== tag) : [...previous, tag]
     );
+  }
+
+  function pickGoalToAdd(tag: CareerGoalTag) {
+    setDraftGoals((previous) => [...previous, { goal: tag, skillTags: [] }]);
+    setAddingGoal(false);
+    setEditingGoal(tag);
+    setEditingSkills([]);
+  }
+
+  function startEditGoal(tag: CareerGoalTag) {
+    const existing = draftGoals.find((d) => d.goal === tag);
+    setEditingGoal(tag);
+    setEditingSkills(existing?.skillTags ?? []);
+  }
+
+  function toggleEditingSkill(tag: SkillTag) {
+    setEditingSkills((previous) =>
+      previous.includes(tag) ? previous.filter((t) => t !== tag) : [...previous, tag]
+    );
+  }
+
+  function selectAllEditingSkills() {
+    if (!editingGoal) return;
+    setEditingSkills(skillsInGoal(editingGoal).map((s) => s.tag));
+  }
+
+  function saveGoalSkills() {
+    if (!editingGoal) return;
+    setDraftGoals((previous) =>
+      previous.map((d) => (d.goal === editingGoal ? { ...d, skillTags: editingSkills } : d))
+    );
+    setEditingGoal(null);
+    setEditingSkills([]);
+  }
+
+  function cancelEditGoal() {
+    const tag = editingGoal;
+    // A freshly-added goal that's cancelled before picking any skills shouldn't
+    // leave an empty card behind.
+    if (tag) {
+      setDraftGoals((previous) =>
+        previous.filter((d) => !(d.goal === tag && d.skillTags.length === 0))
+      );
+    }
+    setEditingGoal(null);
+    setEditingSkills([]);
+  }
+
+  function removeGoal(tag: CareerGoalTag) {
+    setDraftGoals((previous) => previous.filter((d) => d.goal !== tag));
+    if (editingGoal === tag) {
+      setEditingGoal(null);
+      setEditingSkills([]);
+    }
   }
 
   async function onChangeAvatar() {
@@ -149,10 +209,11 @@ function EditProfileForm({ profile, onSaved }: { profile: User; onSaved: () => P
       const nextOffered = canTeach
         ? offeredTags.map((skill) => ({ skill, level: offered[skill] }))
         : [];
-      const nextWanted = canLearn ? wanted : [];
+      const nextGoals = canLearn ? draftGoals : [];
+      const nextExtraWanted = canLearn ? extraWanted : [];
 
       await setSkillsOffered(profile.uid, nextOffered);
-      await setSkillsWanted(profile.uid, nextWanted);
+      await setCareerGoals(profile.uid, nextGoals, nextExtraWanted);
       await onSaved();
       router.back();
     } catch (error) {
@@ -308,15 +369,97 @@ function EditProfileForm({ profile, onSaved }: { profile: User; onSaved: () => P
 
           {canLearn ? (
             <View style={styles.skillSection}>
-              <Text style={styles.sectionTitle}>Skills you want to learn</Text>
+              <Text style={styles.sectionTitle}>Career goals</Text>
+              <Text style={styles.note}>
+                Pick one or more goals — we&apos;ll suggest the skills that matter for each.
+              </Text>
+
+              {draftGoals.map((g) => {
+                const def = careerGoalByTag(g.goal);
+                const isEditing = editingGoal === g.goal;
+                return (
+                  <Card key={g.goal} style={styles.goalCard}>
+                    <View style={styles.goalCardHeader}>
+                      <Text style={styles.subTitle}>{def?.label ?? g.goal}</Text>
+                      <View style={styles.goalCardActions}>
+                        <Pressable
+                          onPress={() => (isEditing ? cancelEditGoal() : startEditGoal(g.goal))}
+                          hitSlop={spacing.sm}
+                          accessibilityRole="button"
+                          accessibilityLabel={isEditing ? 'Cancel editing skills' : 'Edit skills'}>
+                          <Text style={styles.linkText}>{isEditing ? 'Cancel' : 'Edit skills'}</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => removeGoal(g.goal)}
+                          hitSlop={spacing.sm}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Remove ${def?.label ?? g.goal} goal`}>
+                          <Text style={styles.linkTextDanger}>Remove</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+
+                    {isEditing ? (
+                      <>
+                        <View style={styles.selectAllRow}>
+                          <Button label="Select all" variant="secondary" onPress={selectAllEditingSkills} />
+                        </View>
+                        <View style={styles.chipWrap}>
+                          {skillsInGoal(g.goal).map((skill) => (
+                            <Chip
+                              key={skill.tag}
+                              size="sm"
+                              label={skill.label}
+                              selected={editingSkills.includes(skill.tag)}
+                              onPress={() => toggleEditingSkill(skill.tag)}
+                            />
+                          ))}
+                        </View>
+                        <Button label="Done" onPress={saveGoalSkills} style={styles.goalDone} />
+                      </>
+                    ) : g.skillTags.length > 0 ? (
+                      <View style={styles.chipWrap}>
+                        {g.skillTags.map((tag) => (
+                          <Chip key={tag} size="sm" label={skillLabel(tag)} />
+                        ))}
+                      </View>
+                    ) : (
+                      <Text style={styles.note}>No skills selected yet.</Text>
+                    )}
+                  </Card>
+                );
+              })}
+
+              {addingGoal ? (
+                <View style={styles.chipWrap}>
+                  {availableGoalsToAdd.map((g) => (
+                    <Chip key={g.tag} size="sm" label={g.label} onPress={() => pickGoalToAdd(g.tag)} />
+                  ))}
+                </View>
+              ) : null}
+
+              {availableGoalsToAdd.length > 0 ? (
+                <Pressable
+                  onPress={() => setAddingGoal((v) => !v)}
+                  hitSlop={spacing.sm}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add a career goal">
+                  <Text style={styles.linkText}>{addingGoal ? 'Close' : '+ Add a career goal'}</Text>
+                </Pressable>
+              ) : null}
+
+              <View style={styles.divider} />
+
+              <Text style={styles.sectionTitle}>Other skills you want to learn</Text>
+              <Text style={styles.note}>Skills that don&apos;t fit a specific goal above.</Text>
               <View style={styles.chipWrap}>
                 {visibleSkills.map((skill) => (
                   <Chip
                     key={`want-${skill.tag}`}
                     size="sm"
                     label={skill.label}
-                    selected={wanted.includes(skill.tag)}
-                    onPress={() => toggleWanted(skill.tag)}
+                    selected={extraWanted.includes(skill.tag)}
+                    onPress={() => toggleExtraWanted(skill.tag)}
                   />
                 ))}
               </View>
@@ -401,6 +544,34 @@ const styles = StyleSheet.create({
   note: {
     ...type.caption,
     color: colors.inkMuted,
+  },
+  goalCard: {
+    gap: spacing.md,
+  },
+  goalCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  goalCardActions: {
+    flexDirection: 'row',
+    gap: spacing.lg,
+  },
+  linkText: {
+    ...type.label,
+    color: colors.accent,
+  },
+  linkTextDanger: {
+    ...type.label,
+    color: colors.danger,
+  },
+  goalDone: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: spacing.xl,
+  },
+  selectAllRow: {
+    flexDirection: 'row',
   },
   save: {
     marginTop: spacing.md,

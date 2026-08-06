@@ -11,9 +11,11 @@
 
 import type { Timestamp } from 'firebase/firestore';
 
+import type { CareerGoalTag } from '@/constants/careerGoals';
 import type { Category, Level, SkillTag } from '@/constants/skills';
 
 export type { Category, Level, Skill, SkillTag } from '@/constants/skills';
+export type { CareerGoalTag } from '@/constants/careerGoals';
 
 export type UserRole = 'learner' | 'teacher' | 'both';
 
@@ -29,6 +31,18 @@ export type SkillOffered = {
 export type SkillWanted = {
   skill: SkillTag;
   label: string;
+};
+
+/**
+ * A learner's chosen focus within one goal's curriculum. `skillTags` is the
+ * subset of `skillsInGoal(goal)` they actually picked, not the full list —
+ * mirrors `SkillOffered.skill` in that `goal` is the stable key M2/M3 will
+ * key lesson/session progress off later.
+ */
+export type CareerGoal = {
+  goal: CareerGoalTag;
+  label: string;
+  skillTags: SkillTag[];
 };
 
 export type UserStats = {
@@ -51,6 +65,11 @@ export type User = {
   skillsOffered: SkillOffered[];
   /** flat, lowercase — the only field `array-contains` can query */
   skillTagsOffered: SkillTag[];
+  /** user-edited source of truth; `skillsWanted`/`skillTagsWanted` are derived from this + `extraSkillsWanted` */
+  careerGoals: CareerGoal[];
+  /** "no goal attached" bucket — the other source of truth feeding the derived fields */
+  extraSkillsWanted: SkillTag[];
+  /** derived union of `careerGoals[].skillTags` + `extraSkillsWanted` — read-only from the UI's perspective, kept for M2/M3 (§13) */
   skillsWanted: SkillWanted[];
   skillTagsWanted: SkillTag[];
   /** tags passed via the AI skill test — *the app tested them* */

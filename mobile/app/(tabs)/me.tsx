@@ -136,6 +136,8 @@ export default function MeScreen() {
             role={profile.role}
             skillsOffered={profile.skillsOffered}
             skillsWanted={profile.skillsWanted}
+            careerGoals={profile.careerGoals}
+            extraSkillsWanted={profile.extraSkillsWanted}
             onPressOffered={
               canTeach
                 ? (skill) => router.push(`/profile/skill-test/${skill.skill}`)

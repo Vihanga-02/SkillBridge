@@ -11,6 +11,7 @@ import { LoadingState } from '@/components/ui/LoadingState';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { SkeletonList } from '@/components/ui/Skeleton';
 import { UserCard } from '@/components/user/UserCard';
+import { CAREER_GOALS, skillsInGoal, type CareerGoalTag } from '@/constants/careerGoals';
 import {
   CATEGORIES,
   LEVELS,
@@ -25,30 +26,48 @@ import { useAuth } from '@/hooks/useAuth';
 import { useDebounce } from '@/hooks/useDebounce';
 import { usePaginatedQuery } from '@/hooks/usePaginatedQuery';
 import type { PageCursor } from '@/services/pagination';
-import { searchUsers, type UserSort } from '@/services/userService';
+import { searchUsers } from '@/services/userService';
 import type { User } from '@/types';
 
-const SORTS: { value: UserSort | null; label: string }[] = [
-  { value: null, label: 'Any' },
-  { value: 'rating', label: 'Top rated' },
-  { value: 'newest', label: 'Newest' },
+type RoleFilter = 'all' | 'teachers' | 'learners';
+
+const ROLE_FILTERS: { value: RoleFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'teachers', label: 'Teachers' },
+  { value: 'learners', label: 'Learners' },
+];
+
+type BrowseMode = 'category' | 'goal';
+
+const BROWSE_MODES: { value: BrowseMode; label: string }[] = [
+  { value: 'category', label: 'Category' },
+  { value: 'goal', label: 'Career goal' },
 ];
 
 export default function DiscoveryScreen() {
   const { profile } = useAuth();
 
   const [text, setText] = useState('');
+  const [browseMode, setBrowseMode] = useState<BrowseMode>('category');
   const [category, setCategory] = useState<Category | null>(null);
   const [skillTag, setSkillTag] = useState<SkillTag | null>(null);
+  const [careerGoal, setCareerGoal] = useState<CareerGoalTag | null>(null);
   const [level, setLevel] = useState<Level | null>(null);
-  const [sort, setSort] = useState<UserSort | null>(null);
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
 
   const searchTerm = useDebounce(text.trim(), 350);
   const isNameSearch = searchTerm.length > 0;
 
   const fetchPage = useCallback(
-    (cursor: PageCursor) => searchUsers({ text: searchTerm, skillTag, category, sort, cursor }),
-    [searchTerm, skillTag, category, sort]
+    (cursor: PageCursor) =>
+      searchUsers({
+        text: searchTerm,
+        skillTag,
+        category: browseMode === 'category' ? category : null,
+        careerGoal: browseMode === 'goal' ? careerGoal : null,
+        cursor,
+      }),
+    [searchTerm, skillTag, category, careerGoal, browseMode]
   );
 
   const { items, loading, refreshing, loadingMore, error, hasMore, refresh, loadMore } =
@@ -56,27 +75,41 @@ export default function DiscoveryScreen() {
 
   /**
    * `level` lives inside `skillsOffered`, an array of objects, which Firestore
-   * cannot query into — so it is applied here. Self is removed here too, because
-   * an inequality on `uid` would conflict with the sort field's index.
+   * cannot query into — so it is applied here. Role filter is applied here too
+   * so it composes with skill/category queries without needing composite indexes.
+   * Self is removed here as well, because an inequality on `uid` would conflict
+   * with other query fields.
    */
   const results = useMemo(
     () =>
       items.filter((user) => {
         if (user.uid === profile?.uid) return false;
+        if (roleFilter === 'teachers' && user.role === 'learner') return false;
+        if (roleFilter === 'learners' && user.role === 'teacher') return false;
         if (!level) return true;
         return user.skillsOffered.some((skill) => skill.level === level);
       }),
-    [items, level, profile?.uid]
+    [items, level, roleFilter, profile?.uid]
   );
 
-  const hasFilters = isNameSearch || !!category || !!skillTag || !!level || !!sort;
+  const hasFilters =
+    isNameSearch || !!category || !!skillTag || !!careerGoal || !!level || roleFilter !== 'all';
 
   function clearFilters() {
     setText('');
+    setBrowseMode('category');
     setCategory(null);
     setSkillTag(null);
+    setCareerGoal(null);
     setLevel(null);
-    setSort(null);
+    setRoleFilter('all');
+  }
+
+  function switchBrowseMode(next: BrowseMode) {
+    setBrowseMode(next);
+    setCategory(null);
+    setCareerGoal(null);
+    setSkillTag(null);
   }
 
   function selectCategory(next: Category | null) {
@@ -84,7 +117,13 @@ export default function DiscoveryScreen() {
     setSkillTag(null);
   }
 
+  function selectCareerGoal(next: CareerGoalTag | null) {
+    setCareerGoal(next);
+    setSkillTag(null);
+  }
+
   const categorySkills = category ? skillsInCategory(category) : [];
+  const goalSkills = careerGoal ? skillsInGoal(careerGoal) : [];
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -115,19 +154,18 @@ export default function DiscoveryScreen() {
           ) : null}
         </View>
 
-        {/* Sort stays on screen — never buried in a horizontal scroll. */}
+        {/* Role filter stays on screen — never buried in a horizontal scroll. */}
         <View style={styles.sortRow}>
-          <Text style={styles.sortLabel}>Sort</Text>
-          <View style={[styles.sortToggle, isNameSearch && styles.sortDisabled]}>
-            {SORTS.map((option) => {
-              const selected = sort === option.value;
+          <Text style={styles.sortLabel}>Show</Text>
+          <View style={styles.sortToggle}>
+            {ROLE_FILTERS.map((option) => {
+              const selected = roleFilter === option.value;
               return (
                 <Pressable
                   key={option.value}
-                  onPress={() => setSort(option.value)}
-                  disabled={isNameSearch}
+                  onPress={() => setRoleFilter(option.value)}
                   accessibilityRole="button"
-                  accessibilityState={{ selected, disabled: isNameSearch }}
+                  accessibilityState={{ selected }}
                   style={[styles.sortOption, selected && styles.sortOptionSelected]}>
                   <Text style={[styles.sortOptionText, selected && styles.sortOptionTextSelected]}>
                     {option.label}
@@ -138,38 +176,99 @@ export default function DiscoveryScreen() {
           </View>
         </View>
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterRow}>
-          <Chip size="sm" label="All" selected={!category} onPress={() => selectCategory(null)} />
-          {CATEGORIES.map((item) => (
-            <Chip
-              key={item}
-              size="sm"
-              label={item}
-              selected={category === item}
-              onPress={() => selectCategory(category === item ? null : item)}
-            />
-          ))}
-        </ScrollView>
+        {/* Browse by: which set of chips below drives the query — a category's skills or a goal's curriculum. */}
+        <View style={styles.sortRow}>
+          <Text style={styles.sortLabel}>Browse by</Text>
+          <View style={styles.sortToggle}>
+            {BROWSE_MODES.map((option) => {
+              const selected = browseMode === option.value;
+              return (
+                <Pressable
+                  key={option.value}
+                  onPress={() => switchBrowseMode(option.value)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
+                  style={[styles.sortOption, selected && styles.sortOptionSelected]}>
+                  <Text style={[styles.sortOptionText, selected && styles.sortOptionTextSelected]}>
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
 
-        {categorySkills.length > 0 ? (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.filterRow}>
-            {categorySkills.map((skill) => (
-              <Chip
-                key={skill.tag}
-                size="sm"
-                label={skill.label}
-                selected={skillTag === skill.tag}
-                onPress={() => setSkillTag(skillTag === skill.tag ? null : skill.tag)}
-              />
-            ))}
-          </ScrollView>
-        ) : null}
+        {browseMode === 'category' ? (
+          <>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.filterRow}>
+              <Chip size="sm" label="All" selected={!category} onPress={() => selectCategory(null)} />
+              {CATEGORIES.map((item) => (
+                <Chip
+                  key={item}
+                  size="sm"
+                  label={item}
+                  selected={category === item}
+                  onPress={() => selectCategory(category === item ? null : item)}
+                />
+              ))}
+            </ScrollView>
+
+            {categorySkills.length > 0 ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.filterRow}>
+                {categorySkills.map((skill) => (
+                  <Chip
+                    key={skill.tag}
+                    size="sm"
+                    label={skill.label}
+                    selected={skillTag === skill.tag}
+                    onPress={() => setSkillTag(skillTag === skill.tag ? null : skill.tag)}
+                  />
+                ))}
+              </ScrollView>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.filterRow}>
+              <Chip size="sm" label="All" selected={!careerGoal} onPress={() => selectCareerGoal(null)} />
+              {CAREER_GOALS.map((item) => (
+                <Chip
+                  key={item.tag}
+                  size="sm"
+                  label={item.label}
+                  selected={careerGoal === item.tag}
+                  onPress={() => selectCareerGoal(careerGoal === item.tag ? null : item.tag)}
+                />
+              ))}
+            </ScrollView>
+
+            {goalSkills.length > 0 ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.filterRow}>
+                {goalSkills.map((skill) => (
+                  <Chip
+                    key={skill.tag}
+                    size="sm"
+                    label={skill.label}
+                    selected={skillTag === skill.tag}
+                    onPress={() => setSkillTag(skillTag === skill.tag ? null : skill.tag)}
+                  />
+                ))}
+              </ScrollView>
+            ) : null}
+          </>
+        )}
 
         <ScrollView
           horizontal
@@ -305,9 +404,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceAlt,
     borderRadius: radius.sm,
     padding: 2,
-  },
-  sortDisabled: {
-    opacity: 0.5,
   },
   sortOption: {
     flex: 1,

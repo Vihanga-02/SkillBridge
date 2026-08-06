@@ -3,6 +3,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -25,12 +26,16 @@ void SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   return (
-    <SafeAreaProvider>
-      <AuthProvider>
-        <RootNavigator />
-        <StatusBar style="dark" />
-      </AuthProvider>
-    </SafeAreaProvider>
+    // Needed by the pinch-to-zoom credential viewer, and by the gestures every
+    // other component's lists will use.
+    <GestureHandlerRootView style={styles.root}>
+      <SafeAreaProvider>
+        <AuthProvider>
+          <RootNavigator />
+          <StatusBar style="dark" />
+        </AuthProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 
@@ -81,8 +86,19 @@ function RootNavigator() {
         <Stack.Screen name="(auth)" />
       </Stack.Protected>
 
+      {/*
+        Every signed-in screen is declared inside this guard. A route left
+        undeclared is still reachable by deep link regardless of auth state, so
+        omitting one here would open a hole the security rules then have to close.
+      */}
       <Stack.Protected guard={onboarded}>
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="user/[id]" />
+        <Stack.Screen name="credential/[id]" />
+        <Stack.Screen name="profile/edit" />
+        <Stack.Screen name="profile/credentials/index" />
+        <Stack.Screen name="profile/credentials/add" />
+        <Stack.Screen name="profile/skill-test/[skill]" />
       </Stack.Protected>
 
       <Stack.Screen name="+not-found" options={{ headerShown: true, title: 'Not found' }} />
@@ -91,6 +107,9 @@ function RootNavigator() {
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
   splash: {
     flex: 1,
     alignItems: 'center',

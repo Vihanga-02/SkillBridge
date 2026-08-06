@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/ui/Avatar';
@@ -10,8 +11,8 @@ import { Chip } from '@/components/ui/Chip';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { Notice } from '@/components/ui/Notice';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
-import { LEVEL_LABELS } from '@/constants/skills';
-import { colors, sizes, spacing, type } from '@/constants/theme';
+import { SkillPortfolio } from '@/components/user/SkillPortfolio';
+import { colors, radius, sizes, spacing, type } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { logout } from '@/services/authService';
 import type { UserRole } from '@/types';
@@ -24,16 +25,13 @@ const ROLE_LABEL: Record<UserRole, string> = {
   both: 'Teaching & learning',
 };
 
-/**
- * [Shared shell] The account screen Component 0 needs so logout is reachable.
- * Member 1 extends this with the avatar upload, profile editor and the links to
- * My Credentials / My Lessons / My Bookings.
- */
 export default function MeScreen() {
   const { profile, firebaseUser } = useAuth();
   const [error, setError] = useState<string | null>(null);
 
   if (!profile) return <LoadingState fullScreen label="Loading your profile…" />;
+
+  const canTeach = profile.role !== 'learner';
 
   function confirmLogout() {
     Alert.alert('Log out?', 'You can log back in with the same email and password.', [
@@ -55,7 +53,19 @@ export default function MeScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <ScreenHeader title="My account" />
+        <ScreenHeader
+          title="My account"
+          action={
+            <Pressable
+              onPress={() => router.push('/profile/edit')}
+              hitSlop={spacing.sm}
+              accessibilityRole="button"
+              accessibilityLabel="Edit profile"
+              style={styles.headerAction}>
+              <Ionicons name="create-outline" size={sizes.iconLg} color={colors.ink} />
+            </Pressable>
+          }
+        />
 
         {error ? (
           <View style={styles.padded}>
@@ -97,37 +107,88 @@ export default function MeScreen() {
           </Card>
         </View>
 
-        {profile.skillsOffered.length > 0 ? (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>I can teach</Text>
-            <View style={styles.chipWrap}>
-              {profile.skillsOffered.map((skill) => (
-                <Chip
-                  key={skill.skill}
-                  label={`${skill.label} · ${LEVEL_LABELS[skill.level]}`}
-                  icon={skill.verified ? 'checkmark-circle' : undefined}
-                />
-              ))}
-            </View>
-          </View>
-        ) : null}
+        <View style={styles.section}>
+          <MenuRow
+            icon="eye-outline"
+            label="View my public profile"
+            hint="See exactly what a learner sees"
+            onPress={() => router.push(`/user/${profile.uid}`)}
+          />
+          <MenuRow
+            icon="person-circle-outline"
+            label="Edit profile & skills"
+            onPress={() => router.push('/profile/edit')}
+          />
+          {canTeach ? (
+            <MenuRow
+              icon="ribbon-outline"
+              label="My credentials"
+              hint={profile.credentialCount > 0 ? `${profile.credentialCount} attached` : 'None yet'}
+              onPress={() => router.push('/profile/credentials')}
+            />
+          ) : null}
+          <MenuRow icon="book-outline" label="My lessons" hint="Arrives with Component 2" />
+          <MenuRow icon="calendar-outline" label="My bookings" hint="Arrives with Component 3" />
+        </View>
 
-        {profile.skillsWanted.length > 0 ? (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>I want to learn</Text>
-            <View style={styles.chipWrap}>
-              {profile.skillsWanted.map((skill) => (
-                <Chip key={skill.skill} label={skill.label} />
-              ))}
-            </View>
-          </View>
-        ) : null}
+        <View style={styles.section}>
+          <SkillPortfolio
+            role={profile.role}
+            skillsOffered={profile.skillsOffered}
+            skillsWanted={profile.skillsWanted}
+            onPressOffered={
+              canTeach
+                ? (skill) => router.push(`/profile/skill-test/${skill.skill}`)
+                : undefined
+            }
+          />
+          {canTeach && profile.skillsOffered.length > 0 ? (
+            <Text style={styles.muted}>
+              Tap a skill you teach to take its verification test. Passing adds a tick that says
+              SkillBridge tested you — separate from any certificate you upload.
+            </Text>
+          ) : null}
+        </View>
 
         <View style={styles.padded}>
           <Button label="Log out" variant="secondary" icon="log-out-outline" onPress={confirmLogout} />
         </View>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+/** A row without `onPress` renders disabled — the section keeps its final shape. */
+function MenuRow({
+  icon,
+  label,
+  hint,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  hint?: string;
+  onPress?: () => void;
+}) {
+  const disabled = !onPress;
+
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      accessibilityLabel={hint ? `${label}. ${hint}` : label}
+      style={({ pressed }) => [styles.row, pressed && styles.rowPressed, disabled && styles.rowDisabled]}>
+      <Ionicons name={icon} size={sizes.iconMd} color={colors.inkMuted} />
+      <View style={styles.rowText}>
+        <Text style={styles.rowLabel}>{label}</Text>
+        {hint ? <Text style={styles.muted}>{hint}</Text> : null}
+      </View>
+      {disabled ? null : (
+        <Ionicons name="chevron-forward" size={sizes.iconMd} color={colors.inkFaint} />
+      )}
+    </Pressable>
   );
 }
 
@@ -153,13 +214,15 @@ const styles = StyleSheet.create({
   padded: {
     paddingHorizontal: spacing.lg,
   },
+  headerAction: {
+    width: sizes.touchMin,
+    height: sizes.touchMin,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   section: {
     gap: spacing.md,
     paddingHorizontal: spacing.lg,
-  },
-  sectionTitle: {
-    ...type.h1,
-    color: colors.ink,
   },
   identity: {
     alignItems: 'center',
@@ -199,9 +262,29 @@ const styles = StyleSheet.create({
     ...type.h1,
     color: colors.ink,
   },
-  chipWrap: {
+  row: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
+    alignItems: 'center',
+    gap: spacing.md,
+    minHeight: sizes.control,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: colors.border,
+  },
+  rowPressed: {
+    backgroundColor: colors.surfaceAlt,
+  },
+  rowDisabled: {
+    opacity: 0.5,
+  },
+  rowText: {
+    flex: 1,
+    gap: spacing.xs,
+  },
+  rowLabel: {
+    ...type.bodyStrong,
+    color: colors.ink,
   },
 });

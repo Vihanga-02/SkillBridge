@@ -131,6 +131,8 @@ export default function UserProfileScreen() {
             role={user.role}
             skillsOffered={user.skillsOffered}
             skillsWanted={user.skillsWanted}
+            careerGoals={user.careerGoals}
+            extraSkillsWanted={user.extraSkillsWanted}
           />
         </View>
 

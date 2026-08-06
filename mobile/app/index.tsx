@@ -9,13 +9,16 @@ import { useAuth } from '@/hooks/useAuth';
  *   no user                     -> /(auth)/login
  *   user + !onboardingComplete  -> /(auth)/onboarding
  *   user + onboardingComplete   -> /(tabs)/discovery
+ *
+ * Never treat a missing profile during load as "needs onboarding" — that flash
+ * is exactly what returning users saw after email/password login.
  */
 export default function IndexGate() {
   const { loading, firebaseUser, profile } = useAuth();
 
-  if (loading) return <LoadingState fullScreen />;
+  if (loading) return <LoadingState fullScreen label="Signing you in…" />;
   if (!firebaseUser) return <Redirect href="/(auth)/login" />;
-  if (!profile?.onboardingComplete) return <Redirect href="/(auth)/onboarding" />;
+  if (profile?.onboardingComplete !== true) return <Redirect href="/(auth)/onboarding" />;
 
   return <Redirect href="/(tabs)/discovery" />;
 }

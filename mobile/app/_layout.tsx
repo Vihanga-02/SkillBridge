@@ -72,6 +72,18 @@ function RootNavigator() {
     );
   }
 
+  // After the first boot, login/register still briefly leave `loading` true while
+  // the profile snapshot arrives. Keep the splash up so Stack.Protected never
+  // re-opens the auth group and AuthLayout never guesses "needs onboarding".
+  if (bootstrapped && loading && firebaseUser) {
+    return (
+      <View style={styles.splash}>
+        <BrandMark tagline="Peer learning for your campus." />
+        <LoadingState label="Signing you in…" />
+      </View>
+    );
+  }
+
   const onboarded = !loading && !!firebaseUser && profile?.onboardingComplete === true;
 
   return (

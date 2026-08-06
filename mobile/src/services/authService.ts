@@ -16,10 +16,12 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 
+import { careerGoalByTag, type CareerGoalTag } from '@/constants/careerGoals';
 import { ONBOARDING } from '@/constants/config';
 import { skillLabel } from '@/constants/skills';
 import { auth, db } from '@/firebase/config';
-import type { Level, SkillOffered, SkillTag, SkillWanted, UserRole } from '@/types';
+import { deriveWantedSkills } from '@/services/userService';
+import type { CareerGoal, Level, SkillOffered, SkillTag, SkillWanted, UserRole } from '@/types';
 
 /**
  * The default shape of a brand-new profile. Kept as one function because
@@ -38,6 +40,8 @@ function newUserProfile(uid: string, name: string, email: string) {
     location: '',
     skillsOffered: [] as SkillOffered[],
     skillTagsOffered: [] as SkillTag[],
+    careerGoals: [] as CareerGoal[],
+    extraSkillsWanted: [] as SkillTag[],
     skillsWanted: [] as SkillWanted[],
     skillTagsWanted: [] as SkillTag[],
     verifiedSkills: [] as SkillTag[],
@@ -84,7 +88,10 @@ export type OnboardingAnswers = {
   role: UserRole;
   /** each skill the user can teach, with the level they claim */
   skillsOffered: { skill: SkillTag; level: Level }[];
-  skillsWanted: SkillTag[];
+  /** onboarding only asks for one goal; more can be added later from profile edit */
+  careerGoal?: { goal: CareerGoalTag; skillTags: SkillTag[] } | null;
+  /** skills picked with no goal attached — the fallback path when a goal is skipped */
+  extraSkillsWanted: SkillTag[];
 };
 
 /**
@@ -105,10 +112,16 @@ export async function completeOnboarding(
     credentialCount: 0,
   }));
 
-  const skillsWanted: SkillWanted[] = answers.skillsWanted.map((skill) => ({
-    skill,
-    label: skillLabel(skill),
-  }));
+  const careerGoals: CareerGoal[] = answers.careerGoal
+    ? [
+        {
+          goal: answers.careerGoal.goal,
+          label: careerGoalByTag(answers.careerGoal.goal)?.label ?? answers.careerGoal.goal,
+          skillTags: answers.careerGoal.skillTags,
+        },
+      ]
+    : [];
+  const { skillsWanted, skillTagsWanted } = deriveWantedSkills(careerGoals, answers.extraSkillsWanted);
 
   const name = user.displayName?.trim() || user.email?.split('@')[0] || 'SkillBridge member';
   const ref = doc(db, 'users', user.uid);
@@ -124,8 +137,10 @@ export async function completeOnboarding(
       role: answers.role,
       skillsOffered,
       skillTagsOffered: skillsOffered.map((s) => s.skill),
+      careerGoals,
+      extraSkillsWanted: answers.extraSkillsWanted,
       skillsWanted,
-      skillTagsWanted: skillsWanted.map((s) => s.skill),
+      skillTagsWanted,
       onboardingComplete: true,
       updatedAt: serverTimestamp(),
     },

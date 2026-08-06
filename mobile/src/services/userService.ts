@@ -31,24 +31,38 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 
+import { careerGoalByTag, skillsInGoal, type CareerGoalTag } from '@/constants/careerGoals';
 import { FILE_LIMITS, PAGE_SIZE } from '@/constants/config';
 import { skillLabel, skillsInCategory, type Category } from '@/constants/skills';
 import { auth, db } from '@/firebase/config';
 import { nextCursor, type PageCursor } from '@/services/pagination';
-import type { Level, SkillOffered, SkillTag, SkillWanted, TestQuestion, User } from '@/types';
+import type { CareerGoal, Level, SkillOffered, SkillTag, SkillWanted, TestQuestion, User } from '@/types';
 import { uploadFile } from '@/utils/storage';
 
 const usersRef = collection(db, 'users');
 
+/**
+ * Career goals shipped after some accounts already existed, so an older
+ * document simply won't have these two fields — default them here rather
+ * than at every call site (§ "Out of scope" in the career-goals plan).
+ */
+const withDefaults = (data: DocumentData, uid: string): User =>
+  ({
+    ...data,
+    uid,
+    careerGoals: data.careerGoals ?? [],
+    extraSkillsWanted: data.extraSkillsWanted ?? [],
+  }) as User;
+
 const toUser = (snapshot: QueryDocumentSnapshot<DocumentData>): User =>
-  ({ ...snapshot.data(), uid: snapshot.id }) as User;
+  withDefaults(snapshot.data(), snapshot.id);
 
 // ---------------------------------------------------------------- reading
 
 /** One-shot read. This is the call other components use when they need a profile. */
 export async function getUser(uid: string): Promise<User | null> {
   const snapshot = await getDoc(doc(db, 'users', uid));
-  return snapshot.exists() ? ({ ...snapshot.data(), uid: snapshot.id } as User) : null;
+  return snapshot.exists() ? withDefaults(snapshot.data(), snapshot.id) : null;
 }
 
 /** Live profile, so a name or avatar change reflects without a manual refresh. */
@@ -59,7 +73,7 @@ export function subscribeToUser(
 ): Unsubscribe {
   return onSnapshot(
     doc(db, 'users', uid),
-    (snapshot) => onNext(snapshot.exists() ? ({ ...snapshot.data(), uid: snapshot.id } as User) : null),
+    (snapshot) => onNext(snapshot.exists() ? withDefaults(snapshot.data(), snapshot.id) : null),
     (error) => onError?.(error)
   );
 }
@@ -170,6 +184,30 @@ export async function listUsersByCategory(
   return { ...page, items: sortUsers(page.items, sort) };
 }
 
+/**
+ * Same shape as `listUsersByCategory`, but the tag set comes from a career
+ * goal's curriculum instead of a `Category`. Kept separate rather than
+ * generalized over "any tag list" because the two have different empty-input
+ * failure modes worth naming distinctly at the call site.
+ */
+export async function listUsersByCareerGoal(
+  goalTag: CareerGoalTag,
+  opts: UserQueryOptions = {}
+): Promise<UserPage> {
+  const { sort = null, pageSize = PAGE_SIZE.discovery, cursor = null } = opts;
+  const tags = skillsInGoal(goalTag).map((skill) => skill.tag);
+
+  if (tags.length === 0) return { items: [], cursor: null };
+
+  const page = await runUserPage(
+    usersRef,
+    [where('skillTagsOffered', 'array-contains-any', tags)],
+    pageSize,
+    cursor
+  );
+  return { ...page, items: sortUsers(page.items, sort) };
+}
+
 export function listUsers(opts: UserQueryOptions = {}): Promise<UserPage> {
   const { sort = null, pageSize = PAGE_SIZE.discovery, cursor = null } = opts;
   const constraints = sort ? [sortConstraint(sort)] : [];
@@ -181,6 +219,8 @@ export type DiscoveryFilters = {
   text?: string;
   skillTag?: SkillTag | null;
   category?: Category | null;
+  /** Mutually exclusive with `category` at the UI level — the Browse-by toggle picks one. */
+  careerGoal?: CareerGoalTag | null;
 } & UserQueryOptions;
 
 /**
@@ -188,10 +228,11 @@ export type DiscoveryFilters = {
  * the Firestore query at a time; `level` is filtered in the screen because it
  * lives inside an array of objects, which Firestore cannot query into.
  */
-export function searchUsers({ text, skillTag, category, ...opts }: DiscoveryFilters): Promise<UserPage> {
+export function searchUsers({ text, skillTag, category, careerGoal, ...opts }: DiscoveryFilters): Promise<UserPage> {
   const term = text?.trim();
   if (term) return searchUsersByName(term, opts);
   if (skillTag) return searchUsersBySkill(skillTag, opts);
+  if (careerGoal) return listUsersByCareerGoal(careerGoal, opts);
   if (category) return listUsersByCategory(category, opts);
   return listUsers(opts);
 }
@@ -269,12 +310,63 @@ export async function setSkillsOffered(uid: string, drafts: SkillDraft[]): Promi
   });
 }
 
-export async function setSkillsWanted(uid: string, tags: SkillTag[]): Promise<void> {
-  const skillsWanted: SkillWanted[] = tags.map((skill) => ({ skill, label: skillLabel(skill) }));
+/**
+ * `careerGoals` + `extraSkillsWanted` are what the user actually edits;
+ * `skillsWanted`/`skillTagsWanted` are recomputed from them on every write so
+ * M2/M3's integration contract (§13) keeps reading the same flat shape,
+ * regardless of how the learner organized their goals underneath it.
+ * Exported so `authService.completeOnboarding` shares this exact logic.
+ */
+export function deriveWantedSkills(
+  careerGoals: CareerGoal[],
+  extraSkillsWanted: SkillTag[]
+): { skillsWanted: SkillWanted[]; skillTagsWanted: SkillTag[] } {
+  const tags: SkillTag[] = [];
+  const seen = new Set<string>();
+
+  for (const goal of careerGoals) {
+    for (const tag of goal.skillTags) {
+      if (!seen.has(tag)) {
+        seen.add(tag);
+        tags.push(tag);
+      }
+    }
+  }
+  for (const tag of extraSkillsWanted) {
+    if (!seen.has(tag)) {
+      seen.add(tag);
+      tags.push(tag);
+    }
+  }
+
+  return {
+    skillsWanted: tags.map((skill) => ({ skill, label: skillLabel(skill) })),
+    skillTagsWanted: tags,
+  };
+}
+
+/**
+ * Replaces `setSkillsWanted`. Draft-then-save, same as `setSkillsOffered`:
+ * writes both user-edited sources of truth and the two fields derived from
+ * them in one call, so they can never go out of sync.
+ */
+export async function setCareerGoals(
+  uid: string,
+  goals: { goal: CareerGoalTag; skillTags: SkillTag[] }[],
+  extraSkillsWanted: SkillTag[]
+): Promise<void> {
+  const careerGoals: CareerGoal[] = goals.map(({ goal, skillTags }) => ({
+    goal,
+    label: careerGoalByTag(goal)?.label ?? goal,
+    skillTags,
+  }));
+  const { skillsWanted, skillTagsWanted } = deriveWantedSkills(careerGoals, extraSkillsWanted);
 
   await updateDoc(doc(db, 'users', uid), {
+    careerGoals,
+    extraSkillsWanted,
     skillsWanted,
-    skillTagsWanted: tags,
+    skillTagsWanted,
     updatedAt: serverTimestamp(),
   });
 }

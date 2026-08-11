@@ -111,6 +111,11 @@ function RootNavigator() {
         <Stack.Screen name="profile/credentials/index" />
         <Stack.Screen name="profile/credentials/add" />
         <Stack.Screen name="profile/skill-test/[skill]" />
+        <Stack.Screen name="session/create" />
+        <Stack.Screen name="session/[id]" />
+        <Stack.Screen name="session/teacher/[id]" />
+        <Stack.Screen name="booking/[id]" />
+        <Stack.Screen name="booking/calendar" />
       </Stack.Protected>
 
       <Stack.Screen name="+not-found" options={{ headerShown: true, title: 'Not found' }} />

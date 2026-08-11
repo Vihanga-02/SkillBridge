@@ -106,12 +106,24 @@ export default function UserProfileScreen() {
           user={user}
           isOwnProfile={isOwnProfile}
           onEdit={() => router.push('/profile/edit')}
-          // Booking is Component 3 and messaging is Component 4; both CTAs stay
-          // visible but disabled so the profile layout does not change later.
+          onBook={
+            !isOwnProfile && canTeach && me?.role !== 'teacher'
+              ? () =>
+                  router.push({
+                    pathname: '/session/teacher/[id]',
+                    params: { id: user.uid, teacherName: user.name },
+                  })
+              : undefined
+          }
+          // Messaging is Component 4; Book a Session is live for teachers.
           ctaDisabledReason={
             isOwnProfile
               ? undefined
-              : 'Booking and messaging arrive with Components 3 and 4.'
+              : canTeach && me?.role === 'teacher'
+                ? 'Switch to Teach & learn to book. Messaging arrives with Component 4.'
+                : canTeach
+                  ? 'Messaging arrives with Component 4.'
+                : 'This member is not offering sessions yet.'
           }
         />
 

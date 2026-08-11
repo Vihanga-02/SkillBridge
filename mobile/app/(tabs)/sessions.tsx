@@ -27,6 +27,7 @@ import { errorMessage } from '@/utils/authErrors';
 
 type SessionsView = 'browse' | 'bookings' | 'teaching';
 type BookingFilter = 'upcoming' | 'past' | 'cancelled';
+type TeachingView = 'requests' | 'upcoming';
 
 export default function SessionsScreen() {
   const { profile } = useAuth();
@@ -36,6 +37,7 @@ export default function SessionsScreen() {
   const canTeach = teacherOnly || dualRole;
 
   const [view, setView] = useState<SessionsView>('browse');
+  const [teachingViewTab, setTeachingViewTab] = useState<TeachingView>('requests');
   const [bookingFilter, setBookingFilter] = useState<BookingFilter>('upcoming');
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState<Category | null>(null);
@@ -292,63 +294,100 @@ export default function SessionsScreen() {
       {teachingView && !sessionsLoading && !bookingsLoading ? (
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           {sessionsError ? <Notice tone="error" message={sessionsError} /> : null}
-          <View style={styles.section}>
-            <View style={styles.sectionHeading}>
-              <Text style={styles.sectionTitle}>Booking Requests</Text>
-              {pendingRequests.length > 0 ? (
-                <View style={styles.countBadge}>
-                  <Text style={styles.countText}>{pendingRequests.length}</Text>
-                </View>
-              ) : null}
-            </View>
-            {pendingRequests.length === 0 ? (
-              <EmptyState icon="mail-open-outline" title="No booking requests" message="New learner requests appear here." />
-            ) : (
-              <View style={styles.list}>
-                {pendingRequests.map((booking) => (
-                  <View key={booking.id} style={styles.requestBlock}>
-                    <BookingCard
-                      booking={booking}
-                      counterpart={booking.learnerName}
-                      counterpartAvatarUrl={booking.learnerAvatarUrl}
-                      onPress={() => openBooking(booking.id)}
-                    />
-                    <View style={styles.requestActions}>
-                      <Button label="Accept" loading={actingId === booking.id} onPress={() => void onApprove(booking)} style={styles.actionHalf} />
-                      <Button label="Decline" variant="danger" loading={actingId === booking.id} onPress={() => void onDecline(booking)} style={styles.actionHalf} />
-                    </View>
+          <View style={styles.teachingTabs}>
+            <SegmentButton
+              label={`Requests${pendingRequests.length > 0 ? ` (${pendingRequests.length})` : ''}`}
+              selected={teachingViewTab === 'requests'}
+              onPress={() => setTeachingViewTab('requests')}
+            />
+            <SegmentButton
+              label="Upcoming"
+              selected={teachingViewTab === 'upcoming'}
+              onPress={() => setTeachingViewTab('upcoming')}
+            />
+          </View>
+
+          {teachingViewTab === 'requests' ? (
+            <View style={styles.section}>
+              <View style={styles.sectionHeading}>
+                <Text style={styles.sectionTitle}>Booking Requests</Text>
+                {pendingRequests.length > 0 ? (
+                  <View style={styles.countBadge}>
+                    <Text style={styles.countText}>{pendingRequests.length}</Text>
                   </View>
-                ))}
+                ) : null}
               </View>
-            )}
-          </View>
-
-          {scheduledTeaching.length > 0 ? (
-            <BookingList title="Confirmed Learners" bookings={scheduledTeaching} counterpartRole="learner" />
-          ) : null}
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Upcoming Sessions</Text>
-            {upcomingOffers.length === 0 ? (
-              <EmptyState
-                icon="calendar-outline"
-                title="No upcoming sessions"
-                message="Create a session and let learners request a seat."
-                actionLabel="Create session"
-                onAction={() => router.push('/session/create')}
-              />
-            ) : (
-              <View style={styles.list}>
-                {upcomingOffers.map((session) => (
-                  <SessionCard
-                    key={session.id}
-                    session={session}
-                    onPress={() => router.push({ pathname: '/session/[id]', params: { id: session.id } })}
+              {pendingRequests.length === 0 ? (
+                <EmptyState
+                  icon="mail-open-outline"
+                  title="No booking requests"
+                  message="New learner requests appear here."
+                />
+              ) : (
+                <View style={styles.list}>
+                  {pendingRequests.map((booking) => (
+                    <View key={booking.id} style={styles.requestBlock}>
+                      <BookingCard
+                        booking={booking}
+                        counterpart={booking.learnerName}
+                        counterpartAvatarUrl={booking.learnerAvatarUrl}
+                        onPress={() => openBooking(booking.id)}
+                      />
+                      <View style={styles.requestActions}>
+                        <Button
+                          label="Accept"
+                          loading={actingId === booking.id}
+                          onPress={() => void onApprove(booking)}
+                          style={styles.actionHalf}
+                        />
+                        <Button
+                          label="Decline"
+                          variant="danger"
+                          loading={actingId === booking.id}
+                          onPress={() => void onDecline(booking)}
+                          style={styles.actionHalf}
+                        />
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+          ) : (
+            <>
+              {scheduledTeaching.length > 0 ? (
+                <BookingList
+                  title="Confirmed Learners"
+                  bookings={scheduledTeaching}
+                  counterpartRole="learner"
+                />
+              ) : null}
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Upcoming Sessions</Text>
+                {upcomingOffers.length === 0 ? (
+                  <EmptyState
+                    icon="calendar-outline"
+                    title="No upcoming sessions"
+                    message="Create a session and let learners request a seat."
+                    actionLabel="Create session"
+                    onAction={() => router.push('/session/create')}
                   />
-                ))}
+                ) : (
+                  <View style={styles.list}>
+                    {upcomingOffers.map((session) => (
+                      <SessionCard
+                        key={session.id}
+                        session={session}
+                        onPress={() =>
+                          router.push({ pathname: '/session/[id]', params: { id: session.id } })
+                        }
+                      />
+                    ))}
+                  </View>
+                )}
               </View>
-            )}
-          </View>
+            </>
+          )}
         </ScrollView>
       ) : null}
     </SafeAreaView>
@@ -449,6 +488,13 @@ const styles = StyleSheet.create({
   },
   searchInput: { ...type.body, color: colors.ink, flex: 1 },
   categoryRow: { gap: spacing.sm, paddingRight: spacing.lg },
+  teachingTabs: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    padding: spacing.xs,
+    borderRadius: radius.md,
+    backgroundColor: colors.accentSurface,
+  },
   filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   section: { gap: spacing.md },
   sectionHeading: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },

@@ -128,7 +128,12 @@ export default function MeScreen() {
             />
           ) : null}
           <MenuRow icon="book-outline" label="My lessons" hint="Arrives with Component 2" />
-          <MenuRow icon="calendar-outline" label="My bookings" hint="Arrives with Component 3" />
+          <MenuRow
+            icon="calendar-outline"
+            label="My bookings"
+            hint="Track requests and teaching"
+            onPress={() => router.push('/(tabs)/sessions')}
+          />
         </View>
 
         <View style={styles.section}>

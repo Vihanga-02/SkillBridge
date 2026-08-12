@@ -1,0 +1,150 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isTeacher() {
+      return signedIn() && (userRole() == 'teacher' || userRole() == 'both');
+    }
+
+    function isLearner() {
+      return signedIn() && (userRole() == 'learner' || userRole() == 'both');
+    }
+
+    function ownsLesson() {
+      return signedIn() && resource.data.teacherId == request.auth.uid;
+    }
+
+    function enrollmentId(lessonId) {
+      return request.auth.uid + '_' + lessonId;
+    }
+
+    function isEnrolled(lessonId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/enrollments/$(enrollmentId(lessonId)));
+    }
+
+    function isEnrolledAfter(lessonId) {
+      return signedIn()
+        && getAfter(/databases/$(database)/documents/enrollments/$(enrollmentId(lessonId))).data.userId == request.auth.uid;
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && uid == request.auth.uid;
+
+      match /credentials/{credentialId} {
+        allow read: if signedIn() && (uid == request.auth.uid || resource.data.visibility == 'public');
+        allow create, update, delete: if signedIn() && uid == request.auth.uid;
+      }
+    }
+
+    match /lessons/{lessonId} {
+      allow read: if signedIn();
+      allow create: if isTeacher()
+        && request.resource.data.teacherId == request.auth.uid
+        && request.resource.data.ownerId == request.auth.uid;
+      allow update: if (isTeacher()
+          && ownsLesson()
+          && request.resource.data.teacherId == resource.data.teacherId
+          && request.resource.data.ownerId == resource.data.ownerId)
+        || (isEnrolled(lessonId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['completeCount', 'updatedAt']));
+      allow delete: if isTeacher() && ownsLesson();
+    }
+
+    match /enrollments/{enrollmentId} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isLearner()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.completed == false
+        && request.resource.data.progress == 0;
+      allow update: if signedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.lessonId == resource.data.lessonId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'contentCount',
+          'completedContentIds',
+          'progress',
+          'completed',
+          'completedAt',
+          'updatedAt'
+        ]);
+      allow delete: if signedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /lessonProgress/{progressId} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      allow create: if signedIn()
+        && request.resource.data.userId == request.auth.uid
+        && isEnrolledAfter(request.resource.data.lessonId);
+      allow update: if signedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.lessonId == resource.data.lessonId
+        && isEnrolled(resource.data.lessonId);
+      allow delete: if signedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /sessions/{sessionId} {
+      allow read: if signedIn();
+      allow create: if isTeacher() && request.resource.data.teacherId == request.auth.uid;
+      allow update, delete: if isTeacher() && resource.data.teacherId == request.auth.uid;
+    }
+
+    match /sessionSecrets/{sessionId} {
+      allow read, write: if isTeacher() && request.resource.data.teacherId == request.auth.uid;
+    }
+
+    match /bookings/{bookingId} {
+      allow read: if signedIn() && request.auth.uid in resource.data.participantIds;
+      allow create: if signedIn() && request.resource.data.learnerId == request.auth.uid;
+      allow update, delete: if signedIn() && request.auth.uid in resource.data.participantIds;
+    }
+
+    match /skillTests/{testId} {
+      allow read, write: if signedIn()
+        && (resource.data.userId == request.auth.uid || request.resource.data.userId == request.auth.uid);
+    }
+
+    match /reviews/{reviewId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.fromUserId == request.auth.uid;
+    }
+
+    match /posts/{postId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.authorId == request.auth.uid;
+      allow update, delete: if signedIn() && resource.data.authorId == request.auth.uid;
+
+      match /comments/{commentId} {
+        allow read: if signedIn();
+        allow create: if signedIn() && request.resource.data.authorId == request.auth.uid;
+        allow update, delete: if signedIn() && resource.data.authorId == request.auth.uid;
+      }
+    }
+
+    match /chats/{chatId} {
+      allow read, update, delete: if signedIn() && request.auth.uid in resource.data.participantIds;
+      allow create: if signedIn() && request.auth.uid in request.resource.data.participantIds;
+
+      match /messages/{messageId} {
+        allow read: if signedIn()
+          && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
+        allow create: if signedIn() && request.resource.data.senderId == request.auth.uid;
+      }
+    }
+
+    match /aiUsage/{uid} {
+      allow read, write: if signedIn() && uid == request.auth.uid;
+    }
+  }
+}

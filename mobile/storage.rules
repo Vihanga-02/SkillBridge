@@ -1,0 +1,50 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userRole() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isTeacher() {
+      return signedIn() && (userRole() == 'teacher' || userRole() == 'both');
+    }
+
+    function ownsLesson(teacherId, lessonId) {
+      return signedIn()
+        && teacherId == request.auth.uid
+        && firestore.get(/databases/(default)/documents/lessons/$(lessonId)).data.teacherId == request.auth.uid;
+    }
+
+    function isEnrolled(lessonId) {
+      return signedIn()
+        && firestore.exists(/databases/(default)/documents/enrollments/$(request.auth.uid + '_' + lessonId));
+    }
+
+    match /lesson-files/{teacherId}/{lessonId}/{fileName} {
+      allow read: if ownsLesson(teacherId, lessonId) || isEnrolled(lessonId);
+      allow create, update: if isTeacher()
+        && teacherId == request.auth.uid
+        && request.resource.size <= 10 * 1024 * 1024
+        && request.resource.contentType == 'application/pdf';
+      allow delete: if isTeacher() && teacherId == request.auth.uid;
+    }
+
+    match /credentials/{uid}/{fileName} {
+      allow read: if signedIn();
+      allow create, update, delete: if signedIn() && uid == request.auth.uid;
+    }
+
+    match /avatars/{fileName} {
+      allow read: if signedIn();
+      allow create, update, delete: if signedIn()
+        && fileName == request.auth.uid + '.jpg'
+        && request.resource.size <= 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+  }
+}

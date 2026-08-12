@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, type Href } from 'expo-router';
 import { useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -127,7 +127,12 @@ export default function MeScreen() {
               onPress={() => router.push('/profile/credentials')}
             />
           ) : null}
-          <MenuRow icon="book-outline" label="My lessons" hint="Arrives with Component 2" />
+          <MenuRow
+            icon="book-outline"
+            label="My lessons"
+            hint={canTeach ? 'Created and enrolled lessons' : 'Lessons you enrolled in'}
+            onPress={() => router.push('/profile/lessons' as Href)}
+          />
           <MenuRow
             icon="calendar-outline"
             label="My bookings"

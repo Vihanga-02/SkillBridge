@@ -20,7 +20,7 @@ import { listCredentials, listPublicCredentials } from '@/services/credentialSer
 import {
   enrollInLesson,
   listEnrollmentsByUser,
-  listLessonsByTeacher,
+  subscribeToLessonsByTeacher,
 } from '@/services/lessonService';
 import { subscribeToUser } from '@/services/userService';
 import type { Credential, Lesson, LessonEnrollment, User } from '@/types';
@@ -84,18 +84,21 @@ export default function UserProfileScreen() {
     void loadCredentials();
   }, [loadCredentials]);
 
-  const loadTeacherLessons = useCallback(async () => {
-    if (!id) return;
+  const loadTeacherLessons = useCallback(() => {
+    if (!id) return () => undefined;
     setLessonError(null);
-    try {
-      setTeacherLessons(await listLessonsByTeacher(id));
-    } catch (error) {
-      setLessonError(errorMessage(error));
-    }
+    return subscribeToLessonsByTeacher(
+      id,
+      (lessons) => {
+        setTeacherLessons(lessons);
+        setLessonError(null);
+      },
+      (error) => setLessonError(errorMessage(error))
+    );
   }, [id]);
 
   useEffect(() => {
-    void loadTeacherLessons();
+    return loadTeacherLessons();
   }, [loadTeacherLessons]);
 
   const loadViewerEnrollments = useCallback(async () => {
@@ -266,10 +269,10 @@ export default function UserProfileScreen() {
 
         {canTeach ? (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Lessons by this teacher</Text>
+            <Text style={styles.sectionTitle}>Lessons by {user.name}</Text>
 
             {lessonError ? (
-              <ErrorState message={lessonError} onRetry={() => void loadTeacherLessons()} />
+              <ErrorState message={lessonError} />
             ) : teacherLessons.length === 0 ? (
               <Text style={styles.empty}>No lessons available yet.</Text>
             ) : (
@@ -279,7 +282,11 @@ export default function UserProfileScreen() {
                   const isEnrolled = enrolledIds.has(lesson.id);
                   const enrollment = enrollmentByLesson.get(lesson.id);
                   const canEnroll = !!me && viewerCanLearn && !isOwnLesson && !isEnrolled;
-                  const canOpen = isOwnLesson || isEnrolled;
+                  const actionLabel = enrollment?.completed
+                    ? 'Review Lesson'
+                    : isEnrolled
+                      ? 'Continue Learning'
+                      : 'Enroll';
 
                   return (
                     <Card key={lesson.id}>
@@ -298,41 +305,34 @@ export default function UserProfileScreen() {
                         ) : null}
 
                         <View style={styles.lessonActions}>
-                          {canOpen ? (
+                          {isOwnLesson ? (
                             <Button
-                              label={isOwnLesson ? 'View Lesson' : 'Continue Learning'}
+                              label="View Lesson"
                               variant="secondary"
-                              icon="play-outline"
+                              icon="eye-outline"
                               onPress={() =>
                                 router.push({ pathname: '/lesson/[id]', params: { id: lesson.id } })
                               }
                               style={styles.lessonAction}
                             />
-                          ) : (
+                          ) : null}
+                          {!isOwnLesson ? (
                             <Button
-                              label="View Lesson"
-                              variant="secondary"
-                              icon="eye-outline"
-                              disabled
-                              onPress={() => undefined}
+                              label={actionLabel}
+                              icon={isEnrolled ? 'play-outline' : 'add-outline'}
+                              variant={canEnroll ? 'primary' : 'secondary'}
+                              disabled={!canEnroll && !isEnrolled}
+                              loading={enrollingId === lesson.id}
+                              onPress={() => {
+                                if (isEnrolled) {
+                                  router.push({ pathname: '/lesson/[id]', params: { id: lesson.id } });
+                                } else if (canEnroll) {
+                                  void enroll(lesson);
+                                }
+                              }}
                               style={styles.lessonAction}
                             />
-                          )}
-                          <Button
-                            label={isEnrolled ? 'Continue Learning' : 'Enroll'}
-                            icon={isEnrolled ? 'play-outline' : 'add-outline'}
-                            variant={canEnroll ? 'primary' : 'secondary'}
-                            disabled={!canEnroll && !isEnrolled}
-                            loading={enrollingId === lesson.id}
-                            onPress={() => {
-                              if (isEnrolled) {
-                                router.push({ pathname: '/lesson/[id]', params: { id: lesson.id } });
-                              } else if (canEnroll) {
-                                void enroll(lesson);
-                              }
-                            }}
-                            style={styles.lessonAction}
-                          />
+                          ) : null}
                         </View>
                       </View>
                     </Card>

@@ -5,6 +5,7 @@ import {
   getDoc,
   getDocs,
   increment,
+  onSnapshot,
   orderBy,
   query,
   serverTimestamp,
@@ -240,6 +241,25 @@ export async function listLessonsByTeacher(teacherId: string): Promise<Lesson[]>
       .map(toLesson)
       .sort((a, b) => (b.updatedAt?.toMillis?.() ?? 0) - (a.updatedAt?.toMillis?.() ?? 0));
   }
+}
+
+/** Live source of truth for lessons authored by a teacher. */
+export function subscribeToLessonsByTeacher(
+  teacherId: string,
+  onValue: (lessons: Lesson[]) => void,
+  onError?: (error: Error) => void
+): () => void {
+  return onSnapshot(
+    query(lessonsCol, where('teacherId', '==', teacherId)),
+    (snapshot) => {
+      onValue(
+        snapshot.docs
+          .map(toLesson)
+          .sort((a, b) => (b.updatedAt?.toMillis?.() ?? 0) - (a.updatedAt?.toMillis?.() ?? 0))
+      );
+    },
+    (error) => onError?.(error)
+  );
 }
 
 function basePayload(teacher: User, input: LessonInput) {

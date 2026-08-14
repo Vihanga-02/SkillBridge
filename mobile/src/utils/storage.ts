@@ -5,6 +5,19 @@ import { formatFileSize } from '@/utils/format';
 
 export type UploadResult = { url: string; path: string; sizeBytes: number };
 
+export function sanitizeStorageName(value: string, fallback = 'file'): string {
+  const sanitized = value
+    .trim()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+
+  return sanitized || fallback;
+}
+
 /**
  * The one upload helper every component reuses.
  *
@@ -20,7 +33,8 @@ export async function uploadFile(
   path: string,
   localUri: string,
   maxBytes: number,
-  contentType?: string
+  contentType?: string,
+  customMetadata?: Record<string, string>
 ): Promise<UploadResult> {
   const response = await fetch(localUri);
   const blob = await response.blob();
@@ -32,7 +46,10 @@ export async function uploadFile(
   }
 
   const storageRef = ref(storage, path);
-  await uploadBytes(storageRef, blob, contentType ? { contentType } : undefined);
+  await uploadBytes(storageRef, blob, {
+    ...(contentType ? { contentType } : {}),
+    ...(customMetadata ? { customMetadata } : {}),
+  });
 
   return { url: await getDownloadURL(storageRef), path, sizeBytes: blob.size };
 }

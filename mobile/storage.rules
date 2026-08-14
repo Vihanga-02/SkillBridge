@@ -25,13 +25,25 @@ service firebase.storage {
         && firestore.exists(/databases/(default)/documents/enrollments/$(request.auth.uid + '_' + lessonId));
     }
 
-    match /lesson-files/{teacherId}/{lessonId}/{fileName} {
-      allow read: if ownsLesson(teacherId, lessonId) || isEnrolled(lessonId);
+    match /lesson-files/{teacherId}/{lessonFolder}/{fileName} {
+      // Legacy objects use lessonFolder == lessonId. New readable objects carry
+      // the canonical lesson ID as immutable custom metadata.
+      allow read: if ownsLesson(teacherId, lessonFolder)
+        || isEnrolled(lessonFolder)
+        || ('lessonId' in resource.metadata
+          && (ownsLesson(teacherId, resource.metadata.lessonId)
+            || isEnrolled(resource.metadata.lessonId)));
       allow create, update: if isTeacher()
         && teacherId == request.auth.uid
+        && 'lessonId' in request.resource.metadata
+        && ownsLesson(teacherId, request.resource.metadata.lessonId)
         && request.resource.size <= 10 * 1024 * 1024
         && request.resource.contentType == 'application/pdf';
-      allow delete: if isTeacher() && teacherId == request.auth.uid;
+      allow delete: if isTeacher()
+        && teacherId == request.auth.uid
+        && (ownsLesson(teacherId, lessonFolder)
+          || ('lessonId' in resource.metadata
+            && ownsLesson(teacherId, resource.metadata.lessonId)));
     }
 
     match /credentials/{uid}/{fileName} {

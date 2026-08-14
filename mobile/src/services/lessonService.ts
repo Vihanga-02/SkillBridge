@@ -21,7 +21,7 @@ import { FILE_LIMITS } from '@/constants/config';
 import { skillByTag } from '@/constants/skills';
 import { db } from '@/firebase/config';
 import type { Lesson, LessonContent, LessonEnrollment, User } from '@/types';
-import { deleteFile, uploadFile } from '@/utils/storage';
+import { deleteFile, sanitizeStorageName, uploadFile } from '@/utils/storage';
 
 export type LocalPdf = {
   uri: string;
@@ -301,6 +301,7 @@ function basePayload(teacher: User, input: LessonInput) {
 async function buildContents(
   teacherId: string,
   lessonId: string,
+  lessonName: string,
   items: LessonContentInput[],
   previous: LessonContent[] = []
 ): Promise<LessonContent[]> {
@@ -332,12 +333,20 @@ async function buildContents(
       let fileSizeBytes = item.fileSizeBytes ?? 0;
 
       if (item.replacement) {
-        const cleanName = item.replacement.name.replace(/[^\w.\-() ]+/g, '_');
-        const path = `lesson-files/${teacherId}/${lessonId}/${id}-${cleanName}`;
-        const upload = await uploadFile(path, item.replacement.uri, FILE_LIMITS.lessonPdf, item.replacement.contentType);
+        const originalFileName = item.replacement.name.trim();
+        const pdfName = sanitizeStorageName(originalFileName.replace(/\.pdf$/i, ''), 'pdf');
+        const lessonFolder = `${sanitizeStorageName(lessonName, 'lesson')}-${lessonId}`;
+        const path = `lesson-files/${teacherId}/${lessonFolder}/${pdfName}-${id}.pdf`;
+        const upload = await uploadFile(
+          path,
+          item.replacement.uri,
+          FILE_LIMITS.lessonPdf,
+          item.replacement.contentType,
+          { lessonId, contentId: id }
+        );
         fileUrl = upload.url;
         filePath = upload.path;
-        fileName = cleanName;
+        fileName = originalFileName;
         fileSizeBytes = upload.sizeBytes;
 
         if (previousItem?.type === 'pdf' && previousItem.filePath && previousItem.filePath !== filePath) {
@@ -379,7 +388,7 @@ export async function createLesson(teacher: User, input: LessonInput): Promise<s
   await batch.commit();
 
   try {
-    const contents = await buildContents(teacher.uid, ref.id, input.contents);
+    const contents = await buildContents(teacher.uid, ref.id, input.lessonName, input.contents);
     await updateDoc(ref, { contents, updatedAt: serverTimestamp() });
   } catch (error) {
     await deleteDoc(ref);
@@ -397,7 +406,13 @@ export async function updateLesson(teacher: User, lessonId: string, input: Lesso
   if (!existing) throw new Error('That lesson no longer exists.');
   if (existing.teacherId !== teacher.uid) throw new Error('Only the teacher who created this lesson can edit it.');
 
-  const nextContents = await buildContents(teacher.uid, lessonId, input.contents, existing.contents);
+  const nextContents = await buildContents(
+    teacher.uid,
+    lessonId,
+    input.lessonName,
+    input.contents,
+    existing.contents
+  );
   const nextIds = new Set(nextContents.map((item) => item.id));
 
   for (const item of existing.contents) {

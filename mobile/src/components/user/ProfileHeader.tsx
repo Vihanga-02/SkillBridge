@@ -21,6 +21,7 @@ type Props = {
   onEdit?: () => void;
   onBook?: () => void;
   onMessage?: () => void;
+  messageLoading?: boolean;
   /** Set while Components 3 and 4 are not built yet. */
   ctaDisabledReason?: string;
 };
@@ -31,6 +32,7 @@ export function ProfileHeader({
   onEdit,
   onBook,
   onMessage,
+  messageLoading = false,
   ctaDisabledReason,
 }: Props) {
   return (
@@ -89,6 +91,7 @@ export function ProfileHeader({
             label="Message"
             variant="secondary"
             onPress={() => onMessage?.()}
+            loading={messageLoading}
             disabled={!onMessage}
             style={styles.actionHalf}
           />

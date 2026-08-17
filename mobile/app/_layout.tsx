@@ -106,6 +106,7 @@ function RootNavigator() {
       <Stack.Protected guard={onboarded}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="user/[id]" />
+        <Stack.Screen name="chat/[id]" />
         <Stack.Screen name="credential/[id]" />
         <Stack.Screen name="profile/edit" />
         <Stack.Screen name="profile/credentials/index" />

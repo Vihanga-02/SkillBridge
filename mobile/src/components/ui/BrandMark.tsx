@@ -1,45 +1,30 @@
-import { Ionicons } from '@expo/vector-icons';
-import { StyleSheet, Text, View } from 'react-native';
+import { Image } from 'expo-image';
+import { StyleSheet, View } from 'react-native';
 
-import { colors, radius, sizes, spacing, type } from '@/constants/theme';
-
-type Props = {
-  tagline?: string;
-};
+import { sizes } from '@/constants/theme';
 
 /** The wordmark used on the auth screens and the splash gate. */
-export function BrandMark({ tagline }: Props) {
+export function BrandMark() {
   return (
     <View style={styles.wrapper}>
-      <View style={styles.badge}>
-        <Ionicons name="swap-horizontal" size={sizes.iconLg} color={colors.inkInverse} />
-      </View>
-      <Text style={styles.name}>SkillBridge</Text>
-      {tagline ? <Text style={styles.tagline}>{tagline}</Text> : null}
+      <Image
+        source={require('../../../assets/images/logo.png')}
+        style={styles.logo}
+        contentFit="contain"
+        accessibilityLabel="SkillBridge — Learn, Share, Grow Together"
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   wrapper: {
+    width: '100%',
     alignItems: 'center',
-    gap: spacing.sm,
   },
-  badge: {
-    width: sizes.avatarMd + spacing.md,
-    height: sizes.avatarMd + spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  name: {
-    ...type.display,
-    color: colors.ink,
-  },
-  tagline: {
-    ...type.body,
-    color: colors.inkMuted,
-    textAlign: 'center',
+  logo: {
+    width: sizes.preview,
+    maxWidth: '100%',
+    aspectRatio: 1.5,
   },
 });

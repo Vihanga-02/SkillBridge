@@ -57,7 +57,7 @@ export default function LoginScreen() {
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
-          <BrandMark tagline="Trade skills with your campus community." />
+          <BrandMark />
 
           <View style={styles.form}>
             <Text style={styles.heading}>Welcome back</Text>

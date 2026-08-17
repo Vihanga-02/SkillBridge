@@ -4,10 +4,21 @@
  * possible thread, no matter which participant opens it first.
  */
 
-import { doc, runTransaction, serverTimestamp } from 'firebase/firestore';
+import {
+  collection,
+  doc,
+  onSnapshot,
+  orderBy,
+  query,
+  runTransaction,
+  serverTimestamp,
+  type DocumentData,
+  type QueryDocumentSnapshot,
+  type Unsubscribe,
+} from 'firebase/firestore';
 
 import { db } from '@/firebase/config';
-import type { ChatParticipant, User } from '@/types';
+import type { Chat, ChatParticipant, Message, User } from '@/types';
 import { createChatId } from '@/utils/chat';
 
 export { createChatId } from '@/utils/chat';
@@ -19,6 +30,11 @@ const toParticipant = (user: DirectChatUser): ChatParticipant => ({
   name: user.name,
   avatarUrl: user.avatarUrl,
 });
+
+const toChat = (data: DocumentData, id: string): Chat => ({ ...data, id }) as Chat;
+
+const toMessage = (snapshot: QueryDocumentSnapshot<DocumentData>): Message =>
+  ({ ...snapshot.data(), id: snapshot.id }) as Message;
 
 /**
  * Creates the one permitted direct-chat document for this pair when necessary,
@@ -61,4 +77,90 @@ export async function ensureDirectChat(
   });
 
   return chatId;
+}
+
+/** Live chat metadata, including the other participant's display information. */
+export function subscribeToChat(
+  chatId: string,
+  onNext: (chat: Chat | null) => void,
+  onError?: (error: unknown) => void
+): Unsubscribe {
+  return onSnapshot(
+    doc(db, 'chats', chatId),
+    (snapshot) => onNext(snapshot.exists() ? toChat(snapshot.data(), snapshot.id) : null),
+    (error) => onError?.(error)
+  );
+}
+
+/**
+ * Streams a thread in chronological order. The returned unsubscribe function
+ * must be returned from the screen's useEffect cleanup.
+ */
+export function subscribeToMessages(
+  chatId: string,
+  onNext: (messages: Message[]) => void,
+  onError?: (error: unknown) => void
+): Unsubscribe {
+  const messagesQuery = query(
+    collection(db, 'chats', chatId, 'messages'),
+    orderBy('createdAt', 'asc')
+  );
+
+  return onSnapshot(
+    messagesQuery,
+    (snapshot) => onNext(snapshot.docs.map(toMessage)),
+    (error) => onError?.(error)
+  );
+}
+
+/**
+ * Persists one message and the parent chat preview together. The transaction
+ * also rejects a stale/deep-linked chat and prevents a non-participant from
+ * writing to the thread before the Firestore rules make the same guarantee.
+ */
+export async function sendMessage(
+  chatId: string,
+  sender: DirectChatUser,
+  rawText: string
+): Promise<void> {
+  const text = rawText.trim();
+  if (!text) {
+    throw new Error('Type a message before sending.');
+  }
+
+  const chatRef = doc(db, 'chats', chatId);
+  const messageRef = doc(collection(chatRef, 'messages'));
+
+  await runTransaction(db, async (transaction) => {
+    const chatSnapshot = await transaction.get(chatRef);
+    if (!chatSnapshot.exists()) {
+      throw new Error('This conversation is no longer available.');
+    }
+
+    const chat = toChat(chatSnapshot.data(), chatSnapshot.id);
+    if (!chat.participantIds.includes(sender.uid)) {
+      throw new Error('You cannot send a message in this conversation.');
+    }
+
+    const unreadCount = Object.fromEntries(
+      chat.participantIds.map((participantId) => [
+        participantId,
+        participantId === sender.uid ? 0 : (chat.unreadCount?.[participantId] ?? 0) + 1,
+      ])
+    );
+
+    transaction.set(messageRef, {
+      senderId: sender.uid,
+      senderName: sender.name,
+      text,
+      moderation: 'clean',
+      createdAt: serverTimestamp(),
+    });
+    transaction.update(chatRef, {
+      lastMessage: text,
+      lastMessageAt: serverTimestamp(),
+      lastSenderId: sender.uid,
+      unreadCount,
+    });
+  });
 }

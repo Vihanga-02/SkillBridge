@@ -6,6 +6,7 @@ import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BookingStatusBadge } from '@/components/session/BookingStatusBadge';
+import { BookingTimeline } from '@/components/session/BookingTimeline';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -137,6 +138,10 @@ export default function BookingDetailScreen() {
               <MetaRow icon="map-outline" label="Location" value={booking.locationText} />
             ) : null}
           </View>
+        </Card>
+
+        <Card>
+          <BookingTimeline status={booking.status} />
         </Card>
 
         <View style={styles.personBlock}>

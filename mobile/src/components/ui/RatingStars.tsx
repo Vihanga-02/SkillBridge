@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { colors, sizes, spacing, type } from '@/constants/theme';
-import { formatRating } from '@/utils/format';
+import { formatRating, plural } from '@/utils/format';
 
 type DisplayProps = {
   mode?: 'display';
@@ -47,22 +47,34 @@ export function RatingStars(props: Props) {
   }
 
   const { rating, count = 0, hideValue = false } = props;
-  const label = count > 0 ? `${rating.toFixed(1)} out of 5 from ${count} reviews` : 'Not yet rated';
+  const reviewCount = Number.isSafeInteger(count) && count > 0 ? count : 0;
+  const displayRating = Number.isFinite(rating) && rating >= 0 ? Math.min(rating, 5) : 0;
+  const label =
+    reviewCount > 0
+      ? `${displayRating.toFixed(1)} out of 5 from ${plural(reviewCount, 'review')}`
+      : 'No reviews yet';
 
   return (
     <View style={styles.row} accessibilityLabel={label}>
       {STARS.map((star) => (
         <Ionicons
           key={star}
-          name={rating >= star ? 'star' : rating >= star - 0.5 ? 'star-half' : 'star-outline'}
+          name={
+            displayRating >= star
+              ? 'star'
+              : displayRating >= star - 0.5
+                ? 'star-half'
+                : 'star-outline'
+          }
           size={sizes.iconSm}
-          color={count > 0 ? colors.accent : colors.inkFaint}
+          color={reviewCount > 0 ? colors.accent : colors.inkFaint}
         />
       ))}
       {hideValue ? null : (
         <Text style={styles.value}>
-          {formatRating(rating, count)}
-          {count > 0 ? ` (${count})` : ''}
+          {reviewCount > 0
+            ? `${formatRating(displayRating, reviewCount)} (${plural(reviewCount, 'review')})`
+            : formatRating(displayRating, reviewCount)}
         </Text>
       )}
     </View>

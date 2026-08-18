@@ -1,9 +1,4 @@
-/**
- * Component 4 — session-based reviews.
- *
- * SCRUM-79 only records an eligible learner's review. SCRUM-80 extends this
- * transaction with the teacher's aggregate rating update.
- */
+//Component 4 — session-based reviews.
 
 import { doc, runTransaction, serverTimestamp } from 'firebase/firestore';
 
@@ -19,8 +14,8 @@ export const reviewIdFor = (sessionId: string, reviewerId: string): string =>
 
 /**
  * Allows the booked learner to review the session's teacher after completion.
- * The review document and booking flag are committed together so the UI never
- * claims a review was submitted when no corresponding document exists.
+ * The review document, booking flag, and teacher aggregate rating are committed
+ * together so partial writes can never leave the reputation data inconsistent.
  */
 export async function submitLearnerReview(
   bookingId: string,
@@ -64,6 +59,24 @@ export async function submitLearnerReview(
       throw new Error('You have already reviewed this session.');
     }
 
+    const teacherRef = doc(db, 'users', booking.teacherId);
+    const teacherSnapshot = await transaction.get(teacherRef);
+    if (!teacherSnapshot.exists()) {
+      throw new Error('This teacher profile is no longer available.');
+    }
+
+    const teacher = teacherSnapshot.data() as Pick<User, 'ratingAvg' | 'ratingCount'>;
+    const currentCount =
+      Number.isSafeInteger(teacher.ratingCount) && teacher.ratingCount > 0
+        ? teacher.ratingCount
+        : 0;
+    const currentAverage =
+      currentCount > 0 && Number.isFinite(teacher.ratingAvg) && teacher.ratingAvg >= 0
+        ? teacher.ratingAvg
+        : 0;
+    const nextCount = currentCount + 1;
+    const nextAverage = (currentAverage * currentCount + rating) / nextCount;
+
     const review: Omit<Review, 'createdAt'> & { createdAt: ReturnType<typeof serverTimestamp> } = {
       id: reviewId,
       bookingId: booking.id,
@@ -83,6 +96,11 @@ export async function submitLearnerReview(
     transaction.set(reviewRef, review);
     transaction.update(bookingRef, {
       reviewedByLearner: true,
+      updatedAt: serverTimestamp(),
+    });
+    transaction.update(teacherRef, {
+      ratingAvg: nextAverage,
+      ratingCount: nextCount,
       updatedAt: serverTimestamp(),
     });
   });

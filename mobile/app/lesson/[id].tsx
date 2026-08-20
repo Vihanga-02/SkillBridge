@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -37,6 +37,7 @@ export default function LessonDetailScreen() {
   const [error, setError] = useState<string | null>(null);
   const [completed, setCompleted] = useState(false);
   const [savingContentId, setSavingContentId] = useState<string | null>(null);
+  const [accessDenied, setAccessDenied] = useState(false);
 
   useEffect(() => {
     if (!id || !profile) return;
@@ -45,6 +46,7 @@ export default function LessonDetailScreen() {
     (async () => {
       setLoading(true);
       setError(null);
+      setAccessDenied(false);
       try {
         const row = await getLesson(id);
         if (!active) return;
@@ -53,7 +55,8 @@ export default function LessonDetailScreen() {
           const nextEnrollment = await getEnrollment(profile.uid, row.id);
           if (!active) return;
           if (row.teacherId !== profile.uid && !nextEnrollment) {
-            setError('Enroll in this lesson from Learn before opening the content.');
+            setAccessDenied(true);
+            setError('Enroll in this lesson to access the learning materials.');
           } else {
             setLesson(row);
             setEnrollment(nextEnrollment);
@@ -102,6 +105,14 @@ export default function LessonDetailScreen() {
         <ScreenHeader title={lesson?.lessonName ?? 'Lesson'} showBack />
 
         {error ? <Notice tone="error" message={error} /> : null}
+        {accessDenied && id ? (
+          <Button
+            label="View Course Details"
+            variant="secondary"
+            icon="information-circle-outline"
+            onPress={() => router.replace({ pathname: '/lesson/details/[id]', params: { id } })}
+          />
+        ) : null}
 
         {lesson ? (
           <>

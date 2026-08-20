@@ -85,6 +85,7 @@ export default function LessonFormScreen() {
   );
 
   const [lessonName, setLessonName] = useState('');
+  const [description, setDescription] = useState('');
   const [careerGoalId, setCareerGoalId] = useState<CareerGoalTag | null>(null);
   const [contents, setContents] = useState<DraftContent[]>([]);
   const [loading, setLoading] = useState(isEditing);
@@ -105,6 +106,7 @@ export default function LessonFormScreen() {
           setError('Only the teacher who created this lesson can edit it.');
         } else {
           setLessonName(lesson.lessonName);
+          setDescription(lesson.description ?? '');
           setCareerGoalId(lesson.careerGoalId);
           setContents(lessonToDrafts(lesson));
         }
@@ -226,9 +228,14 @@ export default function LessonFormScreen() {
       );
 
       if (isEditing && lessonId) {
-        await updateLesson(profile, lessonId, { lessonName, careerGoalId, contents: inputContents });
+        await updateLesson(profile, lessonId, {
+          lessonName,
+          description,
+          careerGoalId,
+          contents: inputContents,
+        });
       } else {
-        await createLesson(profile, { lessonName, careerGoalId, contents: inputContents });
+        await createLesson(profile, { lessonName, description, careerGoalId, contents: inputContents });
       }
 
       router.replace('/profile/lessons' as Href);
@@ -271,6 +278,17 @@ export default function LessonFormScreen() {
             value={careerGoalId}
             onChange={setCareerGoalId}
             helper="Career goals are loaded from the shared SkillBridge taxonomy."
+          />
+
+          <Input
+            label="Description"
+            value={description}
+            onChangeText={setDescription}
+            placeholder="What will learners understand or be able to do after this lesson?"
+            helper={`${description.length}/1000 characters`}
+            autoCapitalize="sentences"
+            multiline
+            maxLength={1000}
           />
 
           <View style={styles.contentHeader}>

@@ -51,6 +51,7 @@ export type LessonContentInput =
 
 export type LessonInput = {
   lessonName: string;
+  description: string;
   careerGoalId: CareerGoalTag | null;
   contents: LessonContentInput[];
 };
@@ -137,6 +138,7 @@ function normalizeLesson(data: Record<string, unknown>): Lesson {
     teacherName: String(data.teacherName ?? data.ownerName ?? ''),
     teacherAvatarUrl: String(data.teacherAvatarUrl ?? data.ownerAvatarUrl ?? ''),
     lessonName: title,
+    description: String(data.description ?? ''),
     careerGoalId,
     careerGoalName: String(
       data.careerGoalName ??
@@ -199,6 +201,10 @@ export function validateLesson(input: LessonInput): void {
 
   if (!input.careerGoalId || !careerGoalByTag(input.careerGoalId)) {
     throw new Error('Choose a career goal for this lesson.');
+  }
+
+  if (input.description.trim().length > 1000) {
+    throw new Error('Lesson description must be 1000 characters or fewer.');
   }
 
   if (input.contents.length === 0) {
@@ -292,7 +298,7 @@ function basePayload(teacher: User, input: LessonInput) {
     ownerName: teacher.name,
     ownerAvatarUrl: teacher.avatarUrl ?? '',
     title,
-    description: `${goal?.label ?? 'Career'} lesson`,
+    description: input.description.trim(),
     skillTag: primarySkill ?? '',
     category: skill?.category ?? 'Programming',
     level: 'beginner',

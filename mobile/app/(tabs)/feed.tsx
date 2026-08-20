@@ -116,27 +116,22 @@ export default function FeedScreen() {
               const canEnroll = !!profile && profile.role !== 'teacher' && !isOwnLesson && !isEnrolled;
 
               return (
-                <Pressable
-                  key={lesson.id}
-                  onPress={
-                    canOpen
-                      ? () => router.push({ pathname: '/lesson/[id]', params: { id: lesson.id } })
-                      : undefined
-                  }
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled: !canOpen }}
-                  accessibilityLabel={`Open ${lesson.lessonName}`}
-                  style={({ pressed }) => pressed && canOpen && styles.pressed}>
-                <Card>
+                <Card key={lesson.id}>
                   <View style={styles.cardBody}>
-                    <View style={styles.lessonTop}>
+                    <Pressable
+                      onPress={() =>
+                        router.push({ pathname: '/lesson/details/[id]', params: { id: lesson.id } })
+                      }
+                      accessibilityRole="button"
+                      accessibilityLabel={`View details for ${lesson.lessonName}`}
+                      style={({ pressed }) => [styles.lessonTop, pressed && styles.pressed]}>
                       <View style={styles.lessonText}>
                         <Text style={styles.title}>{lesson.lessonName}</Text>
                         <Text style={styles.meta}>Career Goal: {lesson.careerGoalName}</Text>
                         <Text style={styles.teacher}>By {lesson.teacherName || 'SkillBridge teacher'}</Text>
                       </View>
                       <Ionicons name="chevron-forward" size={sizes.iconMd} color={colors.inkFaint} />
-                    </View>
+                    </Pressable>
 
                     <View style={styles.metaRow}>
                       <Ionicons name="albums-outline" size={sizes.iconSm} color={colors.inkMuted} />
@@ -163,7 +158,6 @@ export default function FeedScreen() {
                     />
                   </View>
                 </Card>
-              </Pressable>
               );
             })}
           </View>

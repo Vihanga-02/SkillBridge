@@ -305,6 +305,18 @@ export default function UserProfileScreen() {
                         ) : null}
 
                         <View style={styles.lessonActions}>
+                          <Button
+                            label="Course Details"
+                            variant="secondary"
+                            icon="information-circle-outline"
+                            onPress={() =>
+                              router.push({
+                                pathname: '/lesson/details/[id]',
+                                params: { id: lesson.id },
+                              })
+                            }
+                            style={styles.lessonAction}
+                          />
                           {isOwnLesson ? (
                             <Button
                               label="View Lesson"

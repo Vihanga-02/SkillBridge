@@ -6,16 +6,24 @@ import { formatFileSize } from '@/utils/format';
 export type UploadResult = { url: string; path: string; sizeBytes: number };
 
 export function sanitizeStorageName(value: string, fallback = 'file'): string {
-  const sanitized = value
+  const normalized = value
     .trim()
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
+    .toLowerCase();
+  const extensionIndex = normalized.lastIndexOf('.');
+  const hasExtension = extensionIndex > 0 && extensionIndex < normalized.length - 1;
+  const baseName = hasExtension ? normalized.slice(0, extensionIndex) : normalized;
+  const extension = hasExtension ? normalized.slice(extensionIndex + 1) : '';
+  const sanitizePart = (part: string) =>
+    part
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '');
+  const sanitizedBaseName = sanitizePart(baseName) || fallback;
+  const sanitizedExtension = sanitizePart(extension);
 
-  return sanitized || fallback;
+  return sanitizedExtension ? `${sanitizedBaseName}.${sanitizedExtension}` : sanitizedBaseName;
 }
 
 /**

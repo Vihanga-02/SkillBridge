@@ -56,7 +56,7 @@ function RootNavigator() {
   if (!bootstrapped) {
     return (
       <View style={styles.splash}>
-        <BrandMark />
+        <BrandMark variant="splash" />
         <LoadingState />
       </View>
     );
@@ -78,7 +78,7 @@ function RootNavigator() {
   if (bootstrapped && loading && firebaseUser) {
     return (
       <View style={styles.splash}>
-        <BrandMark />
+        <BrandMark variant="splash" />
         <LoadingState label="Signing you in…" />
       </View>
     );

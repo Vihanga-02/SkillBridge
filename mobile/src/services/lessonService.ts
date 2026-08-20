@@ -8,6 +8,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   updateDoc,
   where,
@@ -164,7 +165,10 @@ export function extractYouTubeVideoId(value: string): string | null {
     const host = parsed.hostname.replace(/^www\./, '').toLowerCase();
 
     if (host === 'youtube.com' || host === 'm.youtube.com') {
-      if (parsed.pathname === '/watch') return parsed.searchParams.get('v');
+      if (parsed.pathname === '/watch') {
+        const id = parsed.searchParams.get('v');
+        return bare.test(id ?? '') ? id : null;
+      }
       const embed = parsed.pathname.match(/^\/(?:embed|shorts)\/([a-zA-Z0-9_-]{11})/);
       return embed?.[1] ?? null;
     }
@@ -223,10 +227,18 @@ export async function getLesson(lessonId: string): Promise<Lesson | null> {
 }
 
 export async function listLessons(): Promise<Lesson[]> {
-  const snapshot = await getDocs(
-    query(lessonsCol, where('published', '==', true), orderBy('updatedAt', 'desc'))
-  );
-  return snapshot.docs.map(toLesson);
+  try {
+    const snapshot = await getDocs(
+      query(lessonsCol, where('published', '==', true), orderBy('updatedAt', 'desc'))
+    );
+    return snapshot.docs.map(toLesson);
+  } catch {
+    // Keep the learner feed available until the composite index is deployed.
+    const snapshot = await getDocs(query(lessonsCol, where('published', '==', true)));
+    return snapshot.docs
+      .map(toLesson)
+      .sort((a, b) => (b.updatedAt?.toMillis?.() ?? 0) - (a.updatedAt?.toMillis?.() ?? 0));
+  }
 }
 
 export async function listLessonsByTeacher(teacherId: string): Promise<Lesson[]> {
@@ -303,7 +315,8 @@ async function buildContents(
   lessonId: string,
   lessonName: string,
   items: LessonContentInput[],
-  previous: LessonContent[] = []
+  previous: LessonContent[] = [],
+  uploadedPaths: string[] = []
 ): Promise<LessonContent[]> {
   const now = null;
   const byId = new Map(previous.map((item) => [item.id, item]));
@@ -344,14 +357,11 @@ async function buildContents(
           item.replacement.contentType,
           { lessonId, contentId: id }
         );
+        uploadedPaths.push(upload.path);
         fileUrl = upload.url;
         filePath = upload.path;
         fileName = originalFileName;
         fileSizeBytes = upload.sizeBytes;
-
-        if (previousItem?.type === 'pdf' && previousItem.filePath && previousItem.filePath !== filePath) {
-          await deleteFile(previousItem.filePath);
-        }
       }
 
       next.push({
@@ -380,6 +390,7 @@ export async function createLesson(teacher: User, input: LessonInput): Promise<s
   batch.set(ref, {
     id: ref.id,
     ...basePayload(teacher, input),
+    published: false,
     contents: [],
     viewCount: 0,
     completeCount: 0,
@@ -387,10 +398,19 @@ export async function createLesson(teacher: User, input: LessonInput): Promise<s
   });
   await batch.commit();
 
+  const uploadedPaths: string[] = [];
   try {
-    const contents = await buildContents(teacher.uid, ref.id, input.lessonName, input.contents);
-    await updateDoc(ref, { contents, updatedAt: serverTimestamp() });
+    const contents = await buildContents(
+      teacher.uid,
+      ref.id,
+      input.lessonName,
+      input.contents,
+      [],
+      uploadedPaths
+    );
+    await updateDoc(ref, { contents, published: true, updatedAt: serverTimestamp() });
   } catch (error) {
+    await Promise.allSettled(uploadedPaths.map(deleteFile));
     await deleteDoc(ref);
     throw error;
   }
@@ -406,28 +426,77 @@ export async function updateLesson(teacher: User, lessonId: string, input: Lesso
   if (!existing) throw new Error('That lesson no longer exists.');
   if (existing.teacherId !== teacher.uid) throw new Error('Only the teacher who created this lesson can edit it.');
 
-  const nextContents = await buildContents(
-    teacher.uid,
-    lessonId,
-    input.lessonName,
-    input.contents,
-    existing.contents
-  );
-  const nextIds = new Set(nextContents.map((item) => item.id));
+  const uploadedPaths: string[] = [];
+  let nextContents: LessonContent[];
+  try {
+    nextContents = await buildContents(
+      teacher.uid,
+      lessonId,
+      input.lessonName,
+      input.contents,
+      existing.contents,
+      uploadedPaths
+    );
 
-  for (const item of existing.contents) {
-    if (item.type === 'pdf' && !nextIds.has(item.id) && item.filePath) {
-      await deleteFile(item.filePath);
-    }
+    const lessonRef = doc(db, 'lessons', lessonId);
+    await runTransaction(db, async (transaction) => {
+      const currentSnapshot = await transaction.get(lessonRef);
+      if (!currentSnapshot.exists()) throw new Error('That lesson no longer exists.');
+      if (currentSnapshot.data().teacherId !== teacher.uid) {
+        throw new Error('Only the teacher who created this lesson can edit it.');
+      }
+      if (currentSnapshot.data().deleting === true) {
+        throw new Error('This lesson is being deleted and can no longer be edited.');
+      }
+      transaction.update(lessonRef, {
+        ...basePayload(teacher, input),
+        contents: nextContents,
+        updatedAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    await Promise.allSettled(uploadedPaths.map(deleteFile));
+    throw error;
   }
 
-  const batch = writeBatch(db);
-  batch.update(doc(db, 'lessons', lessonId), {
-    ...basePayload(teacher, input),
-    contents: nextContents,
-    updatedAt: serverTimestamp(),
-  });
-  await batch.commit();
+  const goal = careerGoalByTag(input.careerGoalId!);
+  const [enrollmentsSnapshot, progressSnapshot] = await Promise.all([
+    getDocs(query(enrollmentsCol, where('lessonId', '==', lessonId))),
+    getDocs(query(lessonProgressCol, where('lessonId', '==', lessonId))),
+  ]);
+  for (let start = 0; start < enrollmentsSnapshot.docs.length; start += 500) {
+    const batch = writeBatch(db);
+    for (const enrollmentDoc of enrollmentsSnapshot.docs.slice(start, start + 500)) {
+      batch.update(enrollmentDoc.ref, {
+        lessonName: input.lessonName.trim(),
+        teacherName: teacher.name,
+        careerGoalId: input.careerGoalId,
+        careerGoalName: goal?.label ?? '',
+        contentCount: nextContents.length,
+        updatedAt: serverTimestamp(),
+      });
+    }
+    await batch.commit();
+  }
+  for (let start = 0; start < progressSnapshot.docs.length; start += 500) {
+    const batch = writeBatch(db);
+    for (const progressDoc of progressSnapshot.docs.slice(start, start + 500)) {
+      batch.update(progressDoc.ref, {
+        lessonTitle: input.lessonName.trim(),
+        skillTag: goal?.skillTags[0] ?? '',
+        updatedAt: serverTimestamp(),
+      });
+    }
+    await batch.commit();
+  }
+
+  const nextFilePaths = new Set(
+    nextContents.flatMap((item) => item.type === 'pdf' ? [item.filePath] : [])
+  );
+  const obsoletePaths = existing.contents.flatMap((item) =>
+    item.type === 'pdf' && item.filePath && !nextFilePaths.has(item.filePath) ? [item.filePath] : []
+  );
+  await Promise.allSettled(obsoletePaths.map(deleteFile));
 }
 
 export async function deleteLesson(teacherId: string, lessonId: string): Promise<void> {
@@ -435,14 +504,17 @@ export async function deleteLesson(teacherId: string, lessonId: string): Promise
   if (!existing) return;
   if (existing.teacherId !== teacherId) throw new Error('Only the teacher who created this lesson can delete it.');
 
+  // Remove the lesson from learner queries before any irreversible cleanup.
+  await updateDoc(doc(db, 'lessons', lessonId), {
+    published: false,
+    deleting: true,
+    updatedAt: serverTimestamp(),
+  });
+
   const [enrollmentsSnapshot, progressSnapshot] = await Promise.all([
     getDocs(query(enrollmentsCol, where('lessonId', '==', lessonId))),
     getDocs(query(lessonProgressCol, where('lessonId', '==', lessonId))),
   ]);
-
-  for (const item of existing.contents) {
-    if (item.type === 'pdf' && item.filePath) await deleteFile(item.filePath);
-  }
 
   const relatedDocs = [...enrollmentsSnapshot.docs, ...progressSnapshot.docs];
   const maxBatchWrites = 500;
@@ -455,6 +527,11 @@ export async function deleteLesson(teacherId: string, lessonId: string): Promise
     await batch.commit();
   }
 
+  await Promise.all(
+    existing.contents.flatMap((item) =>
+      item.type === 'pdf' && item.filePath ? [deleteFile(item.filePath)] : []
+    )
+  );
   await deleteDoc(doc(db, 'lessons', lessonId));
 }
 
@@ -490,35 +567,41 @@ export async function enrollInLesson(user: User, lesson: Lesson): Promise<void> 
   const enrollmentId = enrollmentIdFor(user.uid, lesson.id);
   const enrollmentRef = doc(db, 'enrollments', enrollmentId);
   const progressRef = doc(db, 'lessonProgress', enrollmentId);
-  const existing = await getDoc(enrollmentRef);
-  if (existing.exists()) return;
+  const lessonRef = doc(db, 'lessons', lesson.id);
+  await runTransaction(db, async (transaction) => {
+    const [lessonSnapshot, enrollmentSnapshot] = await Promise.all([
+      transaction.get(lessonRef),
+      transaction.get(enrollmentRef),
+    ]);
+    if (enrollmentSnapshot.exists()) return;
+    if (!lessonSnapshot.exists() || lessonSnapshot.data().published !== true || lessonSnapshot.data().deleting === true) {
+      throw new Error('This lesson is no longer available for enrollment.');
+    }
 
-  const batch = writeBatch(db);
-  batch.set(enrollmentRef, {
-    id: enrollmentId,
-    userId: user.uid,
-    lessonId: lesson.id,
-    lessonName: lesson.lessonName,
-    teacherId: lesson.teacherId,
-    teacherName: lesson.teacherName,
-    careerGoalId: lesson.careerGoalId,
-    careerGoalName: lesson.careerGoalName,
-    contentCount: lesson.contents.length,
-    completedContentIds: [],
-    progress: 0,
-    completed: false,
-    completedAt: null,
-    enrolledAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-  batch.set(
-    progressRef,
-    {
+    const currentLesson = normalizeLesson({ ...lessonSnapshot.data(), id: lessonSnapshot.id });
+    transaction.set(enrollmentRef, {
       id: enrollmentId,
       userId: user.uid,
-      lessonId: lesson.id,
-      lessonTitle: lesson.lessonName,
-      skillTag: lesson.skillTag,
+      lessonId: currentLesson.id,
+      lessonName: currentLesson.lessonName,
+      teacherId: currentLesson.teacherId,
+      teacherName: currentLesson.teacherName,
+      careerGoalId: currentLesson.careerGoalId,
+      careerGoalName: currentLesson.careerGoalName,
+      contentCount: currentLesson.contents.length,
+      completedContentIds: [],
+      progress: 0,
+      completed: false,
+      completedAt: null,
+      enrolledAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    transaction.set(progressRef, {
+      id: enrollmentId,
+      userId: user.uid,
+      lessonId: currentLesson.id,
+      lessonTitle: currentLesson.lessonName,
+      skillTag: currentLesson.skillTag,
       status: 'in_progress',
       lastCardIndex: 0,
       quizScore: 0,
@@ -527,10 +610,8 @@ export async function enrollInLesson(user: User, lesson: Lesson): Promise<void> 
       startedAt: serverTimestamp(),
       completedAt: null,
       updatedAt: serverTimestamp(),
-    },
-    { merge: true }
-  );
-  await batch.commit();
+    }, { merge: true });
+  });
 }
 
 function calculateProgress(completedIds: string[], lesson: Lesson): number {
@@ -547,111 +628,135 @@ export async function toggleLessonContentDone(
 ): Promise<LessonEnrollment> {
   const enrollmentRef = doc(db, 'enrollments', enrollmentIdFor(user.uid, lesson.id));
   const progressRef = doc(db, 'lessonProgress', `${user.uid}_${lesson.id}`);
-  const enrollmentSnapshot = await getDoc(enrollmentRef);
-  if (!enrollmentSnapshot.exists()) {
-    throw new Error('Enroll in this lesson before updating progress.');
-  }
+  const lessonRef = doc(db, 'lessons', lesson.id);
+  const userRef = doc(db, 'users', user.uid);
+  return runTransaction(db, async (transaction) => {
+    const [enrollmentSnapshot, lessonSnapshot] = await Promise.all([
+      transaction.get(enrollmentRef),
+      transaction.get(lessonRef),
+    ]);
+    if (!enrollmentSnapshot.exists()) {
+      throw new Error('Enroll in this lesson before updating progress.');
+    }
+    if (!lessonSnapshot.exists() || lessonSnapshot.data().published !== true || lessonSnapshot.data().deleting === true) {
+      throw new Error('This lesson is no longer available.');
+    }
 
-  const enrollment = normalizeEnrollment(enrollmentSnapshot.data(), enrollmentSnapshot.id);
-  const validContentIds = new Set(lesson.contents.map((item) => item.id));
-  if (!validContentIds.has(contentId)) {
-    throw new Error('That content item is no longer part of this lesson.');
-  }
+    const currentLesson = normalizeLesson({ ...lessonSnapshot.data(), id: lessonSnapshot.id });
+    const validContentIds = new Set(currentLesson.contents.map((item) => item.id));
+    if (!validContentIds.has(contentId)) {
+      throw new Error('That content item is no longer part of this lesson.');
+    }
 
-  const completedSet = new Set(
-    enrollment.completedContentIds.filter((id) => validContentIds.has(id))
-  );
-  if (completedSet.has(contentId)) completedSet.delete(contentId);
-  else completedSet.add(contentId);
+    const enrollment = normalizeEnrollment(enrollmentSnapshot.data(), enrollmentSnapshot.id);
+    const completedSet = new Set(
+      enrollment.completedContentIds.filter((id) => validContentIds.has(id))
+    );
+    if (completedSet.has(contentId)) completedSet.delete(contentId);
+    else completedSet.add(contentId);
 
-  const completedContentIds = [...completedSet];
-  const progress = calculateProgress(completedContentIds, lesson);
-  const completed = lesson.contents.length > 0 && progress === 100;
+    const completedContentIds = [...completedSet];
+    const progress = calculateProgress(completedContentIds, currentLesson);
+    const completed = currentLesson.contents.length > 0 && progress === 100;
+    const completionDelta = Number(completed) - Number(enrollment.completed);
 
-  const batch = writeBatch(db);
-  batch.update(enrollmentRef, {
-    contentCount: lesson.contents.length,
-    completedContentIds,
-    progress,
-    completed,
-    completedAt: completed ? serverTimestamp() : null,
-    updatedAt: serverTimestamp(),
-  });
-  batch.set(
-    progressRef,
-    {
+    transaction.update(enrollmentRef, {
+      contentCount: currentLesson.contents.length,
+      completedContentIds,
+      progress,
+      completed,
+      completedAt: completed ? serverTimestamp() : null,
+      updatedAt: serverTimestamp(),
+    });
+    transaction.set(progressRef, {
       id: progressRef.id,
       userId: user.uid,
       lessonId: lesson.id,
-      lessonTitle: lesson.lessonName,
-      skillTag: lesson.skillTag,
+      lessonTitle: currentLesson.lessonName,
+      skillTag: currentLesson.skillTag,
       status: completed ? 'completed' : 'in_progress',
-      lastCardIndex: Math.max(
-        0,
-        lesson.contents.findIndex((item) => item.id === contentId)
-      ),
+      lastCardIndex: Math.max(0, currentLesson.contents.findIndex((item) => item.id === contentId)),
       quizScore: 0,
       quizAttempts: 0,
       minutesSpent: Math.max(0, completedContentIds.length * 5),
       completedAt: completed ? serverTimestamp() : null,
       updatedAt: serverTimestamp(),
-    },
-    { merge: true }
-  );
+    }, { merge: true });
 
-  await batch.commit();
+    if (completionDelta !== 0) {
+      transaction.update(lessonRef, {
+        completeCount: increment(completionDelta),
+        updatedAt: serverTimestamp(),
+      });
+      transaction.update(userRef, {
+        'stats.lessonsCompleted': increment(completionDelta),
+      });
+    }
 
-  return {
-    ...enrollment,
-    contentCount: lesson.contents.length,
-    completedContentIds,
-    progress,
-    completed,
-    completedAt: completed ? enrollment.completedAt : null,
-    updatedAt: enrollment.updatedAt,
-  };
+    return {
+      ...enrollment,
+      contentCount: currentLesson.contents.length,
+      completedContentIds,
+      progress,
+      completed,
+      completedAt: completed ? enrollment.completedAt : null,
+      updatedAt: enrollment.updatedAt,
+    };
+  });
 }
 
 export async function markLessonCompleted(user: User, lesson: Lesson): Promise<void> {
   const progressRef = doc(db, 'lessonProgress', `${user.uid}_${lesson.id}`);
   const enrollmentRef = doc(db, 'enrollments', enrollmentIdFor(user.uid, lesson.id));
-  const enrollment = await getDoc(enrollmentRef);
-  if (!enrollment.exists() && lesson.teacherId !== user.uid) {
-    throw new Error('Enroll in this lesson before updating progress.');
-  }
+  const lessonRef = doc(db, 'lessons', lesson.id);
+  const userRef = doc(db, 'users', user.uid);
 
-  const batch = writeBatch(db);
-  batch.set(
-    progressRef,
-    {
+  await runTransaction(db, async (transaction) => {
+    const [enrollmentSnapshot, lessonSnapshot] = await Promise.all([
+      transaction.get(enrollmentRef),
+      transaction.get(lessonRef),
+    ]);
+    if (!lessonSnapshot.exists() || lessonSnapshot.data().published !== true || lessonSnapshot.data().deleting === true) {
+      throw new Error('This lesson is no longer available.');
+    }
+    const currentLesson = normalizeLesson({ ...lessonSnapshot.data(), id: lessonSnapshot.id });
+    if (!enrollmentSnapshot.exists() && currentLesson.teacherId !== user.uid) {
+      throw new Error('Enroll in this lesson before updating progress.');
+    }
+    const wasCompleted = enrollmentSnapshot.exists() && enrollmentSnapshot.data().completed === true;
+
+    transaction.set(progressRef, {
       id: progressRef.id,
       userId: user.uid,
-      lessonId: lesson.id,
-      lessonTitle: lesson.lessonName,
-      skillTag: lesson.skillTag,
+      lessonId: currentLesson.id,
+      lessonTitle: currentLesson.lessonName,
+      skillTag: currentLesson.skillTag,
       status: 'completed',
-      lastCardIndex: Math.max(0, lesson.contents.length - 1),
+      lastCardIndex: Math.max(0, currentLesson.contents.length - 1),
       quizScore: 0,
       quizAttempts: 0,
-      minutesSpent: Math.max(5, lesson.contents.length * 5),
+      minutesSpent: Math.max(5, currentLesson.contents.length * 5),
       completedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    },
-    { merge: true }
-  );
-  if (enrollment.exists()) {
-    batch.update(enrollmentRef, {
-      contentCount: lesson.contents.length,
-      completedContentIds: lesson.contents.map((item) => item.id),
-      progress: 100,
-      completed: true,
-      completedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-  }
-  batch.update(doc(db, 'lessons', lesson.id), {
-    completeCount: increment(1),
-    updatedAt: serverTimestamp(),
+    }, { merge: true });
+    if (enrollmentSnapshot.exists()) {
+      transaction.update(enrollmentRef, {
+        contentCount: currentLesson.contents.length,
+        completedContentIds: currentLesson.contents.map((item) => item.id),
+        progress: 100,
+        completed: true,
+        completedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+    if (!wasCompleted) {
+      transaction.update(lessonRef, {
+        completeCount: increment(1),
+        updatedAt: serverTimestamp(),
+      });
+      if (enrollmentSnapshot.exists()) {
+        transaction.update(userRef, { 'stats.lessonsCompleted': increment(1) });
+      }
+    }
   });
-  await batch.commit();
 }

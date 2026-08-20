@@ -56,6 +56,7 @@ export type LessonInput = {
 
 const lessonsCol = collection(db, 'lessons');
 const enrollmentsCol = collection(db, 'enrollments');
+const lessonProgressCol = collection(db, 'lessonProgress');
 
 const toLesson = (snapshot: QueryDocumentSnapshot<DocumentData>): Lesson =>
   normalizeLesson({ ...snapshot.data(), id: snapshot.id });
@@ -222,11 +223,10 @@ export async function getLesson(lessonId: string): Promise<Lesson | null> {
 }
 
 export async function listLessons(): Promise<Lesson[]> {
-  const snapshot = await getDocs(lessonsCol);
-  return snapshot.docs
-    .map(toLesson)
-    .filter((lesson) => lesson.published && !!lesson.teacherId && !!lesson.lessonName)
-    .sort((a, b) => (b.updatedAt?.toMillis?.() ?? 0) - (a.updatedAt?.toMillis?.() ?? 0));
+  const snapshot = await getDocs(
+    query(lessonsCol, where('published', '==', true), orderBy('updatedAt', 'desc'))
+  );
+  return snapshot.docs.map(toLesson);
 }
 
 export async function listLessonsByTeacher(teacherId: string): Promise<Lesson[]> {
@@ -435,13 +435,27 @@ export async function deleteLesson(teacherId: string, lessonId: string): Promise
   if (!existing) return;
   if (existing.teacherId !== teacherId) throw new Error('Only the teacher who created this lesson can delete it.');
 
+  const [enrollmentsSnapshot, progressSnapshot] = await Promise.all([
+    getDocs(query(enrollmentsCol, where('lessonId', '==', lessonId))),
+    getDocs(query(lessonProgressCol, where('lessonId', '==', lessonId))),
+  ]);
+
   for (const item of existing.contents) {
     if (item.type === 'pdf' && item.filePath) await deleteFile(item.filePath);
   }
 
-  const batch = writeBatch(db);
-  batch.delete(doc(db, 'lessons', lessonId));
-  await batch.commit();
+  const relatedDocs = [...enrollmentsSnapshot.docs, ...progressSnapshot.docs];
+  const maxBatchWrites = 500;
+
+  for (let start = 0; start < relatedDocs.length; start += maxBatchWrites) {
+    const batch = writeBatch(db);
+    for (const relatedDoc of relatedDocs.slice(start, start + maxBatchWrites)) {
+      batch.delete(relatedDoc.ref);
+    }
+    await batch.commit();
+  }
+
+  await deleteDoc(doc(db, 'lessons', lessonId));
 }
 
 export const enrollmentIdFor = (userId: string, lessonId: string): string => `${userId}_${lessonId}`;

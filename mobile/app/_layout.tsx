@@ -108,6 +108,7 @@ function RootNavigator() {
         <Stack.Screen name="user/[id]" />
         <Stack.Screen name="credential/[id]" />
         <Stack.Screen name="profile/edit" />
+        <Stack.Screen name="profile/change-password" />
         <Stack.Screen name="profile/credentials/index" />
         <Stack.Screen name="profile/credentials/add" />
         <Stack.Screen name="profile/lessons/index" />

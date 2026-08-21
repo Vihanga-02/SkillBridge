@@ -10,12 +10,14 @@ import { Card } from '@/components/ui/Card';
 import { Chip } from '@/components/ui/Chip';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { LoadingState } from '@/components/ui/LoadingState';
+import { Notice } from '@/components/ui/Notice';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { CredentialsBySkill } from '@/components/user/CredentialsBySkill';
 import { ProfileHeader } from '@/components/user/ProfileHeader';
 import { SkillPortfolio } from '@/components/user/SkillPortfolio';
 import { colors, sizes, spacing, type } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
+import { ensureDirectChat } from '@/services/chatService';
 import { listCredentials, listPublicCredentials } from '@/services/credentialService';
 import {
   enrollInLesson,
@@ -41,6 +43,9 @@ export default function UserProfileScreen() {
   const [enrollments, setEnrollments] = useState<LessonEnrollment[]>([]);
   const [enrolledIds, setEnrolledIds] = useState<Set<string>>(new Set());
   const [enrollingId, setEnrollingId] = useState<string | null>(null);
+
+  const [messageLoading, setMessageLoading] = useState(false);
+  const [messageError, setMessageError] = useState<string | null>(null);
 
   const isOwnProfile = !!me && me.uid === id;
   const viewerCanLearn = me?.role === 'learner' || me?.role === 'both';
@@ -149,9 +154,13 @@ export default function UserProfileScreen() {
   const enrollmentByLesson = new Map(
     enrollments.map((enrollment) => [enrollment.lessonId, enrollment])
   );
+  // Keep a non-null snapshot for the async button handler. React state can be
+  // cleared when a profile listener changes while the transaction is pending.
+  const viewedUser = user;
 
   async function enroll(lesson: Lesson) {
     if (!me) return;
+
     setEnrollingId(lesson.id);
     setLessonError(null);
     try {
@@ -161,6 +170,27 @@ export default function UserProfileScreen() {
       setLessonError(errorMessage(error));
     } finally {
       setEnrollingId(null);
+    }
+  }
+
+  async function openDirectChat() {
+    if (!me || isOwnProfile) return;
+
+    setMessageError(null);
+    setMessageLoading(true);
+
+    try {
+      const chatId = await ensureDirectChat(me, viewedUser);
+      router.push({
+        // Expo refreshes this generated route type when the dev server starts.
+        // A relative path also stays type-safe while that generated file is stale.
+        pathname: '../chat/[id]',
+        params: { id: chatId, participantName: viewedUser.name },
+      });
+    } catch (error) {
+      setMessageError(errorMessage(error));
+    } finally {
+      setMessageLoading(false);
     }
   }
 
@@ -182,17 +212,24 @@ export default function UserProfileScreen() {
                   })
               : undefined
           }
-          // Messaging is Component 4; Book a Session is live for teachers.
+          onMessage={!isOwnProfile && me ? () => void openDirectChat() : undefined}
+          messageLoading={messageLoading}
           ctaDisabledReason={
             isOwnProfile
               ? undefined
               : canTeach && me?.role === 'teacher'
-                ? 'Switch to Teach & learn to book. Messaging arrives with Component 4.'
+                ? 'Switch to Teach & learn to book a session.'
                 : canTeach
-                  ? 'Messaging arrives with Component 4.'
-                : 'This member is not offering sessions yet.'
+                  ? undefined
+                  : 'This member is not offering sessions yet. You can still send a message.'
           }
         />
+
+        {messageError ? (
+          <View style={styles.notice}>
+            <Notice tone="error" message={messageError} />
+          </View>
+        ) : null}
 
         <View style={styles.section}>
           <Card>
@@ -399,6 +436,10 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.xl,
+  },
+  notice: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
   },
   sectionHeader: {
     flexDirection: 'row',

@@ -35,6 +35,7 @@ export const TEXT_LIMITS = {
   credentialTitle: { min: 3, max: 120 },
   credentialIssuer: { min: 2, max: 80 },
   credentialDescription: 300,
+  reviewComment: 500,
 } as const;
 
 /** Quiz / skill-test pass mark, as a percentage. */

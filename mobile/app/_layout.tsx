@@ -106,6 +106,7 @@ function RootNavigator() {
       <Stack.Protected guard={onboarded}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="user/[id]" />
+        <Stack.Screen name="chat/[id]" />
         <Stack.Screen name="credential/[id]" />
         <Stack.Screen name="profile/edit" />
         <Stack.Screen name="profile/change-password" />
@@ -121,6 +122,7 @@ function RootNavigator() {
         <Stack.Screen name="session/teacher/[id]" />
         <Stack.Screen name="booking/[id]" />
         <Stack.Screen name="booking/calendar" />
+        <Stack.Screen name="review/[id]" />
       </Stack.Protected>
 
       <Stack.Screen name="+not-found" options={{ headerShown: true, title: 'Not found' }} />

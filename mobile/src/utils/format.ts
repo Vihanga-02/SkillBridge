@@ -7,10 +7,11 @@ export function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/** `0` ratings render as "New" rather than a misleading 0.0 out of 5. */
+/** Avoid presenting a zero average as a real teacher rating. */
 export function formatRating(average: number, count: number): string {
-  if (count <= 0) return 'New';
-  return average.toFixed(1);
+  if (!Number.isSafeInteger(count) || count <= 0) return 'No reviews yet';
+  const safeAverage = Number.isFinite(average) && average >= 0 ? Math.min(average, 5) : 0;
+  return safeAverage.toFixed(1);
 }
 
 export const plural = (count: number, singular: string, pluralForm?: string): string =>

@@ -178,15 +178,19 @@ export default function BookingDetailScreen() {
             />
           ) : null}
 
-          {booking.status === 'completed' ? (
-            <Button
-              label="Leave Review"
-              variant="secondary"
-              icon="star-outline"
-              onPress={() =>
-                Alert.alert('Coming soon', 'Reviews arrive with Component 4.')
-              }
-            />
+          {isLearner && booking.status === 'completed' ? (
+            booking.reviewedByLearner ? (
+              <Notice tone="success" message="You have already reviewed this session." />
+            ) : (
+              <Button
+                label="Leave Review"
+                variant="secondary"
+                icon="star-outline"
+                onPress={() =>
+                  router.push({ pathname: '../review/[id]', params: { id: booking.id } })
+                }
+              />
+            )
           ) : null}
 
           {isTeacher && booking.status === 'pending' ? (

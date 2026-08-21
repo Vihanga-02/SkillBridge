@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import { useState } from 'react';
+import { router, type Href } from 'expo-router';
+import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -15,6 +15,7 @@ import { SkillPortfolio } from '@/components/user/SkillPortfolio';
 import { colors, radius, sizes, spacing, type } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { logout } from '@/services/authService';
+import { subscribeToLessonsByTeacher } from '@/services/lessonService';
 import type { UserRole } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
 import { formatDate } from '@/utils/date';
@@ -28,10 +29,25 @@ const ROLE_LABEL: Record<UserRole, string> = {
 export default function MeScreen() {
   const { profile, firebaseUser } = useAuth();
   const [error, setError] = useState<string | null>(null);
+  const [createdLessonCount, setCreatedLessonCount] = useState(0);
+
+  const canTeach = profile?.role === 'teacher' || profile?.role === 'both';
+  const profileUid = profile?.uid;
+
+  useEffect(() => {
+    if (!profileUid || !canTeach) {
+      setCreatedLessonCount(0);
+      return;
+    }
+
+    return subscribeToLessonsByTeacher(
+      profileUid,
+      (lessons) => setCreatedLessonCount(lessons.length),
+      (lessonError) => setError(errorMessage(lessonError))
+    );
+  }, [canTeach, profileUid]);
 
   if (!profile) return <LoadingState fullScreen label="Loading your profile…" />;
-
-  const canTeach = profile.role !== 'learner';
 
   function confirmLogout() {
     Alert.alert('Log out?', 'You can log back in with the same email and password.', [
@@ -102,7 +118,10 @@ export default function MeScreen() {
             <View style={styles.statsRow}>
               <Stat label="Taught" value={profile.stats.sessionsTaught} />
               <Stat label="Attended" value={profile.stats.sessionsAttended} />
-              <Stat label="Lessons" value={profile.stats.lessonsCompleted} />
+              <Stat
+                label="Lessons"
+                value={canTeach ? createdLessonCount : profile.stats.lessonsCompleted}
+              />
             </View>
           </Card>
         </View>
@@ -119,6 +138,12 @@ export default function MeScreen() {
             label="Edit profile & skills"
             onPress={() => router.push('/profile/edit')}
           />
+          <MenuRow
+            icon="lock-closed-outline"
+            label="Change password"
+            hint="Update the password you use to sign in"
+            onPress={() => router.push('/profile/change-password' as Href)}
+          />
           {canTeach ? (
             <MenuRow
               icon="ribbon-outline"
@@ -127,7 +152,12 @@ export default function MeScreen() {
               onPress={() => router.push('/profile/credentials')}
             />
           ) : null}
-          <MenuRow icon="book-outline" label="My lessons" hint="Arrives with Component 2" />
+          <MenuRow
+            icon="book-outline"
+            label="My lessons"
+            hint={canTeach ? 'Created and enrolled lessons' : 'Lessons you enrolled in'}
+            onPress={() => router.push('/profile/lessons' as Href)}
+          />
           <MenuRow
             icon="calendar-outline"
             label="My bookings"

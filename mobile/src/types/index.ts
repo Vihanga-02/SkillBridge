@@ -153,9 +153,39 @@ export type Flashcard = { front: string; back: string };
 
 export type QuizQuestion = { q: string; options: string[]; answerIndex: number };
 
+export type LessonContent =
+  | {
+      id: string;
+      type: 'youtube';
+      title: string;
+      videoId: string;
+      url: string;
+      createdAt?: Timestamp | null;
+      updatedAt?: Timestamp | null;
+    }
+  | {
+      id: string;
+      type: 'pdf';
+      title: string;
+      fileName: string;
+      fileUrl: string;
+      filePath: string;
+      fileSizeBytes: number;
+      createdAt?: Timestamp | null;
+      updatedAt?: Timestamp | null;
+    };
+
 /** `lessons/{lessonId}` — owner: Member 2. */
 export type Lesson = {
   id: string;
+  teacherId: string;
+  teacherName: string;
+  teacherAvatarUrl: string;
+  lessonName: string;
+  careerGoalId: CareerGoalTag;
+  careerGoalName: string;
+  contents: LessonContent[];
+  published: boolean;
   ownerId: string;
   ownerName: string;
   ownerAvatarUrl: string;
@@ -194,6 +224,25 @@ export type LessonProgress = {
   minutesSpent: number;
   startedAt: Timestamp | null;
   completedAt: Timestamp | null;
+  updatedAt: Timestamp | null;
+};
+
+/** `enrollments/{uid}_{lessonId}` - one learner enrollment per lesson. */
+export type LessonEnrollment = {
+  id: string;
+  userId: string;
+  lessonId: string;
+  lessonName: string;
+  teacherId: string;
+  teacherName: string;
+  careerGoalId: CareerGoalTag;
+  careerGoalName: string;
+  contentCount: number;
+  completedContentIds: string[];
+  progress: number;
+  completed: boolean;
+  completedAt: Timestamp | null;
+  enrolledAt: Timestamp | null;
   updatedAt: Timestamp | null;
 };
 

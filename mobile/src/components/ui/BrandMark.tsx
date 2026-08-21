@@ -1,45 +1,47 @@
-import { Ionicons } from '@expo/vector-icons';
-import { StyleSheet, Text, View } from 'react-native';
+import { Image } from 'expo-image';
+import { StyleSheet, View } from 'react-native';
 
-import { colors, radius, sizes, spacing, type } from '@/constants/theme';
+import { sizes, spacing } from '@/constants/theme';
 
 type Props = {
-  tagline?: string;
+  variant?: 'login' | 'splash';
 };
 
 /** The wordmark used on the auth screens and the splash gate. */
-export function BrandMark({ tagline }: Props) {
+export function BrandMark({ variant = 'login' }: Props) {
+  const isSplash = variant === 'splash';
+
   return (
     <View style={styles.wrapper}>
-      <View style={styles.badge}>
-        <Ionicons name="swap-horizontal" size={sizes.iconLg} color={colors.inkInverse} />
-      </View>
-      <Text style={styles.name}>SkillBridge</Text>
-      {tagline ? <Text style={styles.tagline}>{tagline}</Text> : null}
+      <Image
+        source={
+          isSplash
+            ? require('../../../assets/images/splash-logo.png')
+            : require('../../../assets/images/logo.png')
+        }
+        style={isSplash ? styles.splashLogo : styles.loginLogo}
+        contentFit="contain"
+        accessibilityLabel={
+          isSplash ? 'SkillBridge' : 'SkillBridge — Learn, Share, Grow Together'
+        }
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   wrapper: {
+    width: '100%',
     alignItems: 'center',
-    gap: spacing.sm,
   },
-  badge: {
-    width: sizes.avatarMd + spacing.md,
-    height: sizes.avatarMd + spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
+  loginLogo: {
+    width: sizes.preview - spacing.xxl * 4,
+    maxWidth: '100%',
+    aspectRatio: 1.5,
   },
-  name: {
-    ...type.display,
-    color: colors.ink,
-  },
-  tagline: {
-    ...type.body,
-    color: colors.inkMuted,
-    textAlign: 'center',
+  splashLogo: {
+    width: sizes.preview,
+    maxWidth: '100%',
+    aspectRatio: 1536 / 900,
   },
 });

@@ -7,6 +7,7 @@
 import {
   collection,
   doc,
+  limit,
   onSnapshot,
   orderBy,
   query,
@@ -18,6 +19,7 @@ import {
 } from 'firebase/firestore';
 
 import { db } from '@/firebase/config';
+import { PAGE_SIZE } from '@/constants/config';
 import type { Chat, ChatParticipant, Message, User } from '@/types';
 import { createChatId } from '@/utils/chat';
 
@@ -30,6 +32,13 @@ const toParticipant = (user: DirectChatUser): ChatParticipant => ({
   name: user.name,
   avatarUrl: user.avatarUrl,
 });
+
+const sameParticipant = (value: unknown, participant: ChatParticipant): boolean => {
+  if (!value || typeof value !== 'object') return false;
+
+  const stored = value as Partial<ChatParticipant>;
+  return stored.name === participant.name && stored.avatarUrl === participant.avatarUrl;
+};
 
 const toChat = (data: DocumentData, id: string): Chat => ({ ...data, id }) as Chat;
 
@@ -57,7 +66,27 @@ export async function ensureDirectChat(
     const existingChat = await transaction.get(chatRef);
 
     // Do not overwrite an existing last message, unread counts, or timestamp.
-    if (existingChat.exists()) return;
+    if (existingChat.exists()) {
+      const storedParticipants = existingChat.data().participants;
+      const participants =
+        storedParticipants && typeof storedParticipants === 'object' ? storedParticipants : {};
+      const currentParticipant = toParticipant(currentUser);
+      const otherParticipant = toParticipant(otherUser);
+
+      if (
+        !sameParticipant(participants[currentUser.uid], currentParticipant) ||
+        !sameParticipant(participants[otherUser.uid], otherParticipant)
+      ) {
+        transaction.update(chatRef, {
+          participants: {
+            ...participants,
+            [currentUser.uid]: currentParticipant,
+            [otherUser.uid]: otherParticipant,
+          },
+        });
+      }
+      return;
+    }
 
     transaction.set(chatRef, {
       participantIds,
@@ -93,8 +122,7 @@ export function subscribeToChat(
 }
 
 /**
- * Streams a thread in chronological order. The returned unsubscribe function
- * must be returned from the screen's useEffect cleanup.
+ * Streams the newest message page in chronological order.
  */
 export function subscribeToMessages(
   chatId: string,
@@ -103,12 +131,13 @@ export function subscribeToMessages(
 ): Unsubscribe {
   const messagesQuery = query(
     collection(db, 'chats', chatId, 'messages'),
-    orderBy('createdAt', 'asc')
+    orderBy('createdAt', 'desc'),
+    limit(PAGE_SIZE.messages)
   );
 
   return onSnapshot(
     messagesQuery,
-    (snapshot) => onNext(snapshot.docs.map(toMessage)),
+    (snapshot) => onNext(snapshot.docs.map(toMessage).reverse()),
     (error) => onError?.(error)
   );
 }

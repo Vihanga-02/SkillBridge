@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ProgressBar } from '@/components/lesson/ProgressBar';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Chip } from '@/components/ui/Chip';
@@ -18,8 +19,13 @@ import { colors, sizes, spacing, type } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { ensureDirectChat } from '@/services/chatService';
 import { listCredentials, listPublicCredentials } from '@/services/credentialService';
+import {
+  enrollInLesson,
+  listEnrollmentsByUser,
+  subscribeToLessonsByTeacher,
+} from '@/services/lessonService';
 import { subscribeToUser } from '@/services/userService';
-import type { Credential, User } from '@/types';
+import type { Credential, Lesson, LessonEnrollment, User } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
 
 export default function UserProfileScreen() {
@@ -32,11 +38,17 @@ export default function UserProfileScreen() {
 
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [credentialsError, setCredentialsError] = useState<string | null>(null);
+  const [teacherLessons, setTeacherLessons] = useState<Lesson[]>([]);
+  const [lessonError, setLessonError] = useState<string | null>(null);
+  const [enrollments, setEnrollments] = useState<LessonEnrollment[]>([]);
+  const [enrolledIds, setEnrolledIds] = useState<Set<string>>(new Set());
+  const [enrollingId, setEnrollingId] = useState<string | null>(null);
 
   const [messageLoading, setMessageLoading] = useState(false);
   const [messageError, setMessageError] = useState<string | null>(null);
 
   const isOwnProfile = !!me && me.uid === id;
+  const viewerCanLearn = me?.role === 'learner' || me?.role === 'both';
 
   // Live, so a rating written by Member 4's review transaction appears without a
   // manual refresh — this screen only ever reads ratingAvg and ratingCount.
@@ -76,6 +88,44 @@ export default function UserProfileScreen() {
   useEffect(() => {
     void loadCredentials();
   }, [loadCredentials]);
+
+  const loadTeacherLessons = useCallback(() => {
+    if (!id) return () => undefined;
+    setLessonError(null);
+    return subscribeToLessonsByTeacher(
+      id,
+      (lessons) => {
+        setTeacherLessons(lessons);
+        setLessonError(null);
+      },
+      (error) => setLessonError(errorMessage(error))
+    );
+  }, [id]);
+
+  useEffect(() => {
+    return loadTeacherLessons();
+  }, [loadTeacherLessons]);
+
+  const loadViewerEnrollments = useCallback(async () => {
+    if (!me || me.role === 'teacher') {
+      setEnrollments([]);
+      setEnrolledIds(new Set());
+      return;
+    }
+
+    try {
+      const rows = await listEnrollmentsByUser(me.uid);
+      setEnrollments(rows);
+      setEnrolledIds(new Set(rows.map((enrollment) => enrollment.lessonId)));
+    } catch {
+      setEnrollments([]);
+      setEnrolledIds(new Set());
+    }
+  }, [me]);
+
+  useEffect(() => {
+    void loadViewerEnrollments();
+  }, [loadViewerEnrollments]);
 
   if (userLoading) {
     return (
@@ -169,7 +219,10 @@ export default function UserProfileScreen() {
             <View style={styles.statsRow}>
               <Stat label="Taught" value={user.stats?.sessionsTaught ?? 0} />
               <Stat label="Attended" value={user.stats?.sessionsAttended ?? 0} />
-              <Stat label="Lessons" value={user.stats?.lessonsCompleted ?? 0} />
+              <Stat
+                label="Lessons"
+                value={canTeach ? teacherLessons.length : (user.stats?.lessonsCompleted ?? 0)}
+              />
             </View>
           </Card>
         </View>
@@ -229,6 +282,94 @@ export default function UserProfileScreen() {
                   })
                 }
               />
+            )}
+          </View>
+        ) : null}
+
+        {canTeach ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Lessons by {user.name}</Text>
+
+            {lessonError ? (
+              <ErrorState message={lessonError} />
+            ) : teacherLessons.length === 0 ? (
+              <Text style={styles.empty}>No lessons available yet.</Text>
+            ) : (
+              <View style={styles.lessonList}>
+                {teacherLessons.map((lesson) => {
+                  const isOwnLesson = me?.uid === lesson.teacherId;
+                  const isEnrolled = enrolledIds.has(lesson.id);
+                  const enrollment = enrollmentByLesson.get(lesson.id);
+                  const canEnroll = !!me && viewerCanLearn && !isOwnLesson && !isEnrolled;
+                  const actionLabel = enrollment?.completed
+                    ? 'Review Lesson'
+                    : isEnrolled
+                      ? 'Continue Learning'
+                      : 'Enroll';
+
+                  return (
+                    <Card key={lesson.id}>
+                      <View style={styles.lessonCard}>
+                        <Text style={styles.lessonTitle}>{lesson.lessonName}</Text>
+                        <Text style={styles.lessonMeta}>Career Goal: {lesson.careerGoalName}</Text>
+                        <Text style={styles.lessonMeta}>
+                          {lesson.contents.length} content {lesson.contents.length === 1 ? 'item' : 'items'}
+                        </Text>
+
+                        {enrollment ? (
+                          <ProgressBar
+                            progress={enrollment.progress}
+                            completed={enrollment.completed}
+                          />
+                        ) : null}
+
+                        <View style={styles.lessonActions}>
+                          <Button
+                            label="Course Details"
+                            variant="secondary"
+                            icon="information-circle-outline"
+                            onPress={() =>
+                              router.push({
+                                pathname: '/lesson/details/[id]',
+                                params: { id: lesson.id },
+                              })
+                            }
+                            style={styles.lessonAction}
+                          />
+                          {isOwnLesson ? (
+                            <Button
+                              label="View Lesson"
+                              variant="secondary"
+                              icon="eye-outline"
+                              onPress={() =>
+                                router.push({ pathname: '/lesson/[id]', params: { id: lesson.id } })
+                              }
+                              style={styles.lessonAction}
+                            />
+                          ) : null}
+                          {!isOwnLesson ? (
+                            <Button
+                              label={actionLabel}
+                              icon={isEnrolled ? 'play-outline' : 'add-outline'}
+                              variant={canEnroll ? 'primary' : 'secondary'}
+                              disabled={!canEnroll && !isEnrolled}
+                              loading={enrollingId === lesson.id}
+                              onPress={() => {
+                                if (isEnrolled) {
+                                  router.push({ pathname: '/lesson/[id]', params: { id: lesson.id } });
+                                } else if (canEnroll) {
+                                  void enroll(lesson);
+                                }
+                              }}
+                              style={styles.lessonAction}
+                            />
+                          ) : null}
+                        </View>
+                      </View>
+                    </Card>
+                  );
+                })}
+              </View>
             )}
           </View>
         ) : null}
@@ -325,5 +466,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
+  },
+  lessonList: {
+    gap: spacing.md,
+  },
+  lessonCard: {
+    gap: spacing.sm,
+  },
+  lessonTitle: {
+    ...type.h2,
+    color: colors.ink,
+  },
+  lessonMeta: {
+    ...type.body,
+    color: colors.inkMuted,
+  },
+  lessonActions: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    paddingTop: spacing.sm,
+  },
+  lessonAction: {
+    flex: 1,
   },
 });

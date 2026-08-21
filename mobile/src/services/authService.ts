@@ -8,9 +8,12 @@
 
 import {
   createUserWithEmailAndPassword,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
+  updatePassword,
   updateProfile,
   type User as FirebaseUser,
 } from 'firebase/auth';
@@ -83,6 +86,41 @@ export const login = (email: string, password: string) =>
 export const logout = () => signOut(auth);
 
 export const resetPassword = (email: string) => sendPasswordResetEmail(auth, email.trim());
+
+/**
+ * Signed-in password change. Firebase requires a recent login for
+ * `updatePassword`, so we re-authenticate with the current password first —
+ * that also verifies the user actually knows the old one.
+ */
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  const user = auth.currentUser;
+  if (!user?.email) {
+    throw new Error('You need to be signed in with email to change your password.');
+  }
+
+  try {
+    const credential = EmailAuthProvider.credential(user.email, currentPassword);
+    await reauthenticateWithCredential(user, credential);
+    await updatePassword(user, newPassword);
+  } catch (error) {
+    // Remap shared login wording so this screen can say "current password"
+    // instead of "email or password". Throw plain Errors (no `code`) so
+    // `errorMessage` surfaces these strings instead of the login map.
+    if (typeof error === 'object' && error !== null && 'code' in error) {
+      const code = String((error as { code: unknown }).code);
+      if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+        throw new Error('Current password is incorrect.');
+      }
+      if (code === 'auth/requires-recent-login') {
+        throw new Error('Please log in again, then try changing your password.');
+      }
+      if (code === 'auth/weak-password') {
+        throw new Error('New password must be at least 6 characters.');
+      }
+    }
+    throw error;
+  }
+}
 
 export type OnboardingAnswers = {
   role: UserRole;

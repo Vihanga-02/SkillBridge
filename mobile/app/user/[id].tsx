@@ -151,9 +151,27 @@ export default function UserProfileScreen() {
 
   const canManageCredentials = isOwnProfile && user.role !== 'learner';
   const canTeach = user.role === 'teacher' || user.role === 'both';
+  const enrollmentByLesson = new Map(
+    enrollments.map((enrollment) => [enrollment.lessonId, enrollment])
+  );
   // Keep a non-null snapshot for the async button handler. React state can be
   // cleared when a profile listener changes while the transaction is pending.
   const viewedUser = user;
+
+  async function enroll(lesson: Lesson) {
+    if (!me) return;
+
+    setEnrollingId(lesson.id);
+    setLessonError(null);
+    try {
+      await enrollInLesson(me, lesson);
+      await loadViewerEnrollments();
+    } catch (error) {
+      setLessonError(errorMessage(error));
+    } finally {
+      setEnrollingId(null);
+    }
+  }
 
   async function openDirectChat() {
     if (!me || isOwnProfile) return;

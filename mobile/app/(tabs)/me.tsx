@@ -138,6 +138,12 @@ export default function MeScreen() {
             label="Edit profile & skills"
             onPress={() => router.push('/profile/edit')}
           />
+          <MenuRow
+            icon="lock-closed-outline"
+            label="Change password"
+            hint="Update the password you use to sign in"
+            onPress={() => router.push('/profile/change-password' as Href)}
+          />
           {canTeach ? (
             <MenuRow
               icon="ribbon-outline"

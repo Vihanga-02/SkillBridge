@@ -1,4 +1,4 @@
-# SkillBridge — Implementation Plan v2.2 (Final)
+# SkillBridge — Implementation Plan v2.3 (Plan + Implementation Tracker)
 **SDG 4 & 8 — Community Skill-Exchange & Micro-Learning Mobile App**
 
 Stack: React Native (Expo, TypeScript, Expo Router) · Firebase (Auth + Firestore + Storage + Cloud Functions) · Gemini API
@@ -39,6 +39,171 @@ This version merges the three feature lists your group members suggested into th
 | Shared catalog `src/constants/careerGoals.ts` | Same pattern as `skills.ts` — one file, typed tags, no free text. M2/M3 can later key lesson/session progress off the stable `goal` tag. |
 | Discovery browse-by-goal + role filter | Discovery can filter by Category **or** Career goal, and by All / Teachers / Learners (replaces Top-rated / Newest sort). |
 | Skill taxonomy trimmed | Languages, Music, Crafts, Fitness removed — catalog focuses on Programming, Design, Business, Academic plus cloud/security/analysis skills that career goals need. |
+
+### Added in v2.3
+
+| Addition | Why |
+|---|---|
+| **Implementation audit and live tracker** | Separates what is present in the repository from the original target scope, so file existence is not mistaken for a finished feature. |
+| **Prioritized remaining-work backlog** | P0/P1/P2 priorities keep release, security and end-to-end integration ahead of AI and stretch work. |
+| **Low-change completeness suggestions** | Adds a few useful polish ideas that do not require a new backend domain or a major architecture change. |
+
+---
+
+## Implementation Status — audited 21 September 2026
+
+This section is the current source of truth for progress. Sections 1–21 below remain the **target design and acceptance criteria**. A route or type existing does not count as complete unless the feature is connected to real data and reachable from the UI.
+
+**Legend:** ✅ implemented and wired · 🟡 partially implemented · ⬜ not implemented in this repository · ❓ external Firebase/deployment state cannot be confirmed from the repository
+
+### Audit basis and current health
+
+The audit inspected `mobile/app`, `mobile/src`, dependencies, tests and repository configuration. It did not assume that Firebase console configuration or a deployed APK exists unless a corresponding tracked file or artefact proves it.
+
+| Check | Result | Notes |
+|---|---|---|
+| TypeScript | ✅ | `npm run typecheck` passes. |
+| ESLint | ✅ | `npm run lint` passes with no reported warnings or errors. |
+| Automated tests | 🟡 | 3 suites / 10 tests pass (register, login and deterministic chat ID), including a clean `--detectOpenHandles` run. Coverage is still very small for the implemented surface. |
+| Source structure | ✅ | 32 route files, 9 service files and the shared theme/types/catalogues are present. |
+| Manual UI report | 🟡 | `SCRUM-43_Manual_UI_Test_Report.pdf` exists, but this code audit did not validate its test cases against the current commit. |
+| Local Firebase config | ✅ | `.env.example`, Firebase client initialization and persistent React Native auth are present; `.env` is ignored. |
+| Deployable Firebase backend config | ⬜ | No `firebase.json`, `firestore.rules`, `storage.rules` or `firestore.indexes.json` is tracked. Security and required indexes therefore cannot be reproduced or reviewed from Git. |
+| Release configuration | ⬜ | No `eas.json` or committed APK/build record is present. |
+
+### Component progress summary
+
+| Component | Status | Implemented now | Main remaining work |
+|---|---|---|---|
+| **0. Auth & app shell** | ✅ | Register, login, reset password, persistent login, live profile context, protected routing, role-aware onboarding, logout and an extra change-password screen. | Add integration/security-rule tests and verify persistence/deep links on a release build. |
+| **1. Profile, portfolio & discovery** | 🟡 Near complete | Discovery search/filter/pagination, role and career-goal browsing, public/own profile, profile editing, avatar, skills, career goals, credentials CRUD/viewer, fallback skill tests, badges display, lesson cards, Book and Message CTAs. | Add public reviews and offered sessions inline; add Gemini-generated/cached tests and related-skill suggestions only after core work; validate private credentials with deployed rules. |
+| **2. Micro-learning** | 🟡 Core flow works | Teacher lesson CRUD, multiple YouTube/PDF items, enrolment, lesson details/viewer, per-item completion, percentage progress, authored/enrolled lesson list and completion counters. | Add text/notes, flashcards, quizzes, practice content, progress dashboard/streak, full feed filters/pagination/refresh and AI generators. |
+| **3. Peer sessions** | 🟡 Core flow works | Session creation/browse/detail, teacher calendar, transactional seat booking, approve/decline/cancel/complete lifecycle, status timeline, online join link, learner review hand-off and profile stats updates. | Add edit/cancel-session UI, live session subscription, mode/date filters, attendee display, booking-to-chat CTA, credential deep-link and missing service APIs/tests. |
+| **4. Community & reputation** | 🟡 Early partial | Deterministic direct chat, real-time text thread, unread counter writes, learner-to-teacher review transaction and live aggregate rating display. | Replace placeholder Community tab with Feed/Chats, add conversation list/read state, review list/tags, teacher reviews, all post/comment/like flows, moderation and optional images. |
+| **Backend, AI & release** | ⬜ | Firebase client SDK is configured and service-layer transactions exist. | Commit/deploy rules and indexes, create Gemini proxy/quota layer, seed data, EAS profiles, APK smoke test and security attack tests. |
+
+### Detailed tracker — Component 0 and shared foundation
+
+- [x] Email/password registration and login with readable Firebase errors
+- [x] Forgot-password email and success state
+- [x] AsyncStorage-backed auth persistence
+- [x] Live `AuthContext` for Firebase user + Firestore profile
+- [x] Protected auth/onboarding/app routes
+- [x] Role-aware onboarding with offered skills, optional career goal and wanted skills
+- [x] Logout and change-password flow
+- [x] Shared theme, skill catalogue, career-goal catalogue, types and reusable UI components
+- [ ] Add tests for reset password, onboarding, routing guards, logout, password change and missing-profile recovery
+- [ ] Verify cold-start persistence and protected deep links on a physical-device release build
+
+### Detailed tracker — Component 1
+
+- [x] Discovery by name, role, category, career goal, skill and level
+- [x] Paginated discovery with loading, empty and error states
+- [x] Public profile header, rating, portfolio, goal-grouped wanted skills and badges
+- [x] Profile edit with role-gated offered/wanted sections and derived wanted-skill fields
+- [x] Avatar upload
+- [x] Credential add/edit/delete, public/private visibility, recount, file cleanup and viewer
+- [x] Credential image zoom, PDF open and external verification link
+- [x] Hardcoded skill-test bank, attempt recording and verified-skill update
+- [x] Lessons by a user, lesson enrolment/continue actions, Book and Message CTAs
+- [ ] Render **sessions offered by this user** inline on the public profile
+- [ ] Render **reviews for this user** inline on the public profile
+- [ ] Add Gemini generation/cache for skills outside the fallback bank
+- [ ] Add related-skill suggestions only after P0/P1 core scope is complete
+- [ ] Prove with deployed security rules that another user cannot read a private credential directly
+
+### Detailed tracker — Component 2
+
+- [x] Teacher create/edit/delete lesson flow
+- [x] Multiple YouTube links and PDF uploads in one lesson
+- [x] Browse lesson cards and filter by career goal
+- [x] Enrolment plus authored/enrolled lesson management
+- [x] YouTube/PDF viewer with per-content completion and percentage progress
+- [x] Completion updates lesson count and `users.stats.lessonsCompleted`
+- [ ] Add category, skill and level filters, `FlatList` pagination and pull-to-refresh to the lesson feed
+- [ ] Add text/notes content and practice exercises
+- [ ] Add flashcard editor/viewer with saved card position
+- [ ] Add lesson quiz route, scoring/review and quiz-attempt persistence
+- [ ] Add progress dashboard: completed skills/lessons, minutes, streak and badges
+- [ ] Implement the planned streak update using `lastActiveDate`
+- [ ] Add editable AI-generated quiz and flashcard drafts with a manual fallback
+
+### Detailed tracker — Component 3
+
+- [x] Browse/search/category filtering and separate learner/teacher views
+- [x] Create online or in-person, one-to-one or group sessions
+- [x] Session detail and teacher calendar with marked available dates
+- [x] Transactional booking with deterministic one-booking-per-learner ID and seat protection
+- [x] Teacher approve/decline and learner cancel actions return seats correctly
+- [x] Teacher completion guard and participant-stat updates
+- [x] Booking status timeline, location/join-link handling and review CTA
+- [ ] Add session editing (`updateSession`) and expose `cancelSession` in the UI
+- [ ] Add mode and date filters promised by the session browser
+- [ ] Add a live `subscribeToSession` path so seats/status update without a manual reload
+- [ ] Show attendee avatars/count in session detail
+- [ ] Add **Message teacher/learner** from booking detail using the existing deterministic chat service
+- [ ] Show teacher credential count and deep-link to the profile credential section
+- [ ] Add the missing `getBookingsForSession` / reusable busy-date API and concurrency tests
+- [ ] Keep meeting links protected: the implementation uses `sessionSecrets`, so rules for that extra collection must be designed and tested
+
+### Detailed tracker — Component 4
+
+- [x] Deterministic direct-chat creation from a public profile
+- [x] Live text-message subscription and listener cleanup
+- [x] Parent chat preview/unread counters updated with each message
+- [x] Learner-to-teacher review after a completed booking
+- [x] Transactional rating aggregate and duplicate-review prevention
+- [ ] Replace the placeholder `app/(tabs)/community.tsx` with Feed/Chats tabs
+- [ ] Add `subscribeToMyChats`, conversation rows sorted by latest message and `markChatRead`
+- [ ] Link the other participant's chat header to their profile
+- [ ] Add review tags, review queries/list UI and the public-profile reviews section
+- [ ] Decide explicitly whether teacher-to-learner reviews remain in scope; implement them or update the target model/UI to learner-only reviews
+- [ ] Add `postService`, post composer, feed, filters, detail, likes, comments and author deletion
+- [ ] Add moderation for posts/chat before claiming the Gemini safety feature
+- [ ] Add chat/post image uploads only after the text-only community flow is stable
+
+### Cross-cutting, backend and release tracker
+
+- [x] Shared 60:30:10 palette and typography are used across the app; the only screen-file hex is inside isolated YouTube player HTML
+- [x] Firestore writes use `serverTimestamp()`; JavaScript `Date` is used only for local parsing/comparison/display
+- [x] Core credentials, lesson progress, booking and rating operations use transactions/batches where consistency matters
+- [ ] Finish the strict theme-token audit: discovery and the shared Chip still contain a few raw numeric size/padding values
+- [ ] Add and deploy `firestore.rules`, including `sessionSecrets` and direct private-credential tests
+- [ ] Add and deploy `storage.rules` for avatars, credentials and lesson files
+- [ ] Add `firestore.indexes.json`; remove query fallbacks once required indexes are deployed
+- [ ] Complete all 18 integration contracts in §6, especially profile reviews/sessions, booking chat and achievement posts
+- [ ] Add unit/service tests for credentials, lessons, bookings, ratings and chats; add Firebase Emulator rule tests
+- [ ] Add `scripts/seed.js` (the current `scripts/` directory is empty)
+- [ ] Add `firebase.json` and document emulator/deployment commands
+- [ ] Add `eas.json`, perform an Android preview build and smoke-test the APK on a real phone
+- [ ] Rehearse and record the full §15 demo journey using seeded data
+- [ ] Build the Gemini proxy and quota/cache layer only after the non-AI core journey passes
+- [ ] Keep push notifications and the credits leaderboard as stretch goals, not blockers
+
+### Prioritized remaining-work backlog
+
+| Priority | Work package | Completion evidence |
+|---|---|---|
+| **P0 — release/security** | Firestore/Storage rules, indexes, `firebase.json`, emulator attack tests | Rules and indexes tracked in Git; unauthorized reads/writes fail; all app queries pass. |
+| **P0 — complete the user journey** | Community chat list, profile reviews/sessions, booking Message CTA, session edit/cancel | A new user can discover → inspect → book → approve → message → complete → review without hidden/dead-end navigation. |
+| **P0 — demo reliability** | Seed script, EAS preview configuration, APK/device smoke test | Fresh demo data can be restored and the same build completes the demo journey on a real phone. |
+| **P1 — planned learning scope** | Quiz, flashcards, progress dashboard/streak and feed filters/pagination | A learner can consume each advertised lesson format and see durable progress. |
+| **P1 — planned community scope** | Posts, comments, likes, chat read state and profile review list | Community tab has no placeholder and every advertised social action persists. |
+| **P1 — confidence** | Service, transaction, component and security-rule tests | Critical concurrency/authorization cases run automatically, including two learners competing for the last seat. |
+| **P2 — AI** | Gemini proxy, quota/cache, generated tests/quizzes/flashcards, session drafting and moderation | No key ships in the app; offline/manual fallbacks remain usable. |
+| **P2 — stretch** | Notifications and award-only credits/leaderboard | Attempt only when every P0 and P1 acceptance journey is stable. |
+
+### Small completeness improvements not in the remaining plan
+
+These are deliberately low-change additions. Do not start them before P0 work.
+
+1. **Help, safety and privacy screen** — add one static route linked from the registration terms text and Me tab. Explain self-declared credentials, community conduct, privacy and how to report a problem. This closes the current dead-end T&C checkbox without a new backend.
+2. **Native Share actions** — use React Native's built-in `Share` API on profiles, lessons and sessions. It needs no new collection and makes recruitment/demo sharing much easier.
+3. **Profile-completeness checklist** — derive it client-side from avatar, bio, location, offered/wanted skills and credentials; show the next useful action in Me. No schema change is required.
+4. **Session timezone and copy-details action** — display the device timezone beside session time and let users copy/share date, location or meeting details. This avoids campus-demo confusion with little code.
+5. **In-app “What does verified mean?” explainer** — reuse the existing distinction between skill tests and self-declared credentials in a small modal/notice reachable from badges.
+
+**Scope guard:** saved items, blocking/report workflows, account deletion, calendar sync and offline downloads sound small but require new data lifecycle, permissions or moderation decisions. Treat them as future work unless all planned core features are already complete.
 
 ---
 

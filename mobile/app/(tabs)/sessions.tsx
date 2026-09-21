@@ -21,7 +21,7 @@ import {
   requestBooking,
   subscribeToMyBookings,
 } from '@/services/bookingService';
-import { getSessionsByTeacher, listUpcomingSessions } from '@/services/sessionService';
+import { deleteSession, getSessionsByTeacher, listUpcomingSessions } from '@/services/sessionService';
 import type { Booking, Session } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
 
@@ -150,6 +150,33 @@ export default function SessionsScreen() {
     } finally {
       setActingId(null);
     }
+  }
+
+  function confirmDeleteSession(session: Session) {
+    if (!profile) return;
+    Alert.alert(
+      'Delete session?',
+      `Delete "${session.title}" permanently? This cannot be undone.`,
+      [
+        { text: 'Keep session', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setActingId(session.id);
+            setSessionsError(null);
+            try {
+              await deleteSession(session.id, profile.uid);
+              await loadSessions();
+            } catch (actionError) {
+              Alert.alert('Could not delete session', errorMessage(actionError));
+            } finally {
+              setActingId(null);
+            }
+          },
+        },
+      ]
+    );
   }
 
   function confirmQuickBooking(session: Session) {
@@ -374,15 +401,52 @@ export default function SessionsScreen() {
                   />
                 ) : (
                   <View style={styles.list}>
-                    {upcomingOffers.map((session) => (
-                      <SessionCard
-                        key={session.id}
-                        session={session}
-                        onPress={() =>
-                          router.push({ pathname: '/session/[id]', params: { id: session.id } })
-                        }
-                      />
-                    ))}
+                    {upcomingOffers.map((session) => {
+                      const hasBooking =
+                        (session.bookingCount ?? 0) > 0 ||
+                        session.seatsTaken > 0 ||
+                        teachingBookings.some((booking) => booking.sessionId === session.id);
+                      return (
+                        <View key={session.id} style={styles.offerBlock}>
+                          <SessionCard
+                            session={session}
+                            onPress={() =>
+                              router.push({ pathname: '/session/[id]', params: { id: session.id } })
+                            }
+                          />
+                          {hasBooking ? (
+                            <Notice
+                              tone="info"
+                              message="Editing and deletion are locked because a learner has booked this session."
+                            />
+                          ) : (
+                            <View style={styles.offerActions}>
+                              <Button
+                                label="Edit"
+                                variant="secondary"
+                                icon="create-outline"
+                                disabled={actingId === session.id}
+                                onPress={() =>
+                                  router.push({
+                                    pathname: '/session/create',
+                                    params: { id: session.id },
+                                  })
+                                }
+                                style={styles.actionHalf}
+                              />
+                              <Button
+                                label="Delete"
+                                variant="danger"
+                                icon="trash-outline"
+                                loading={actingId === session.id}
+                                onPress={() => confirmDeleteSession(session)}
+                                style={styles.actionHalf}
+                              />
+                            </View>
+                          )}
+                        </View>
+                      );
+                    })}
                   </View>
                 )}
               </View>
@@ -511,6 +575,8 @@ const styles = StyleSheet.create({
   countText: { ...type.caption, color: colors.inkInverse, fontWeight: '700' },
   list: { gap: spacing.md },
   requestBlock: { gap: spacing.sm },
+  offerBlock: { gap: spacing.sm },
+  offerActions: { flexDirection: 'row', gap: spacing.md },
   requestActions: { flexDirection: 'row', gap: spacing.md },
   actionHalf: { flex: 1 },
 });

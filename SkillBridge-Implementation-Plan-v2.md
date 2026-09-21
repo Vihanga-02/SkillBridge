@@ -64,7 +64,7 @@ The audit inspected `mobile/app`, `mobile/src`, dependencies, tests and reposito
 |---|---|---|
 | TypeScript | ✅ | `npm run typecheck` passes. |
 | ESLint | ✅ | `npm run lint` passes with no reported warnings or errors. |
-| Automated tests | 🟡 | 3 suites / 10 tests pass (register, login and deterministic chat ID), including a clean `--detectOpenHandles` run. Coverage is still very small for the implemented surface. |
+| Automated tests | 🟡 | 4 suites / 14 tests pass (register, login, deterministic chat ID and profile-completeness rules), including a clean `--detectOpenHandles` run. Coverage is still small for the implemented surface. |
 | Source structure | ✅ | 32 route files, 9 service files and the shared theme/types/catalogues are present. |
 | Manual UI report | 🟡 | `SCRUM-43_Manual_UI_Test_Report.pdf` exists, but this code audit did not validate its test cases against the current commit. |
 | Local Firebase config | ✅ | `.env.example`, Firebase client initialization and persistent React Native auth are present; `.env` is ignored. |
@@ -106,6 +106,7 @@ The audit inspected `mobile/app`, `mobile/src`, dependencies, tests and reposito
 - [x] Credential image zoom, PDF open and external verification link
 - [x] Hardcoded skill-test bank, attempt recording and verified-skill update
 - [x] Lessons by a user, lesson enrolment/continue actions, Book and Message CTAs
+- [x] Role-aware profile-completeness checklist and next-action CTA in Me (client-derived; no schema change)
 - [ ] Render **sessions offered by this user** inline on the public profile
 - [ ] Render **reviews for this user** inline on the public profile
 - [ ] Add Gemini generation/cache for skills outside the fallback bank
@@ -199,7 +200,7 @@ These are deliberately low-change additions. Do not start them before P0 work.
 
 1. **Help, safety and privacy screen** — add one static route linked from the registration terms text and Me tab. Explain self-declared credentials, community conduct, privacy and how to report a problem. This closes the current dead-end T&C checkbox without a new backend.
 2. **Native Share actions** — use React Native's built-in `Share` API on profiles, lessons and sessions. It needs no new collection and makes recruitment/demo sharing much easier.
-3. **Profile-completeness checklist** — derive it client-side from avatar, bio, location, offered/wanted skills and credentials; show the next useful action in Me. No schema change is required.
+3. ✅ **Profile-completeness checklist (implemented)** — derived client-side from avatar, bio, location, role-relevant offered/wanted skills and credentials; Me shows progress, checklist state and the next useful action. No schema change was required.
 4. **Session timezone and copy-details action** — display the device timezone beside session time and let users copy/share date, location or meeting details. This avoids campus-demo confusion with little code.
 5. **In-app “What does verified mean?” explainer** — reuse the existing distinction between skill tests and self-declared credentials in a small modal/notice reachable from badges.
 

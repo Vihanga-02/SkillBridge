@@ -19,6 +19,7 @@ import { subscribeToLessonsByTeacher } from '@/services/lessonService';
 import type { UserRole } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
 import { formatDate } from '@/utils/date';
+import { getProfileCompleteness } from '@/utils/profileCompleteness';
 
 const ROLE_LABEL: Record<UserRole, string> = {
   learner: 'Learning',
@@ -48,6 +49,17 @@ export default function MeScreen() {
   }, [canTeach, profileUid]);
 
   if (!profile) return <LoadingState fullScreen label="Loading your profile…" />;
+
+  const profileCompleteness = getProfileCompleteness(profile);
+
+  function openCompletenessAction() {
+    if (profileCompleteness.nextItem?.destination === 'credentials') {
+      router.push('/profile/credentials');
+      return;
+    }
+
+    router.push('/profile/edit');
+  }
 
   function confirmLogout() {
     Alert.alert('Log out?', 'You can log back in with the same email and password.', [
@@ -109,6 +121,68 @@ export default function MeScreen() {
               ) : null}
 
               <Text style={styles.muted}>Member since {formatDate(profile.createdAt)}</Text>
+            </View>
+          </Card>
+        </View>
+
+        <View style={styles.padded}>
+          <Card>
+            <View style={styles.completeness}>
+              <View style={styles.completenessHeader}>
+                <View style={styles.completenessHeading}>
+                  <Text style={styles.completenessTitle}>Profile completeness</Text>
+                  <Text style={styles.muted}>
+                    {profileCompleteness.completedCount} of {profileCompleteness.items.length} complete
+                  </Text>
+                </View>
+                <Text style={styles.completenessPercent}>{profileCompleteness.percentage}%</Text>
+              </View>
+
+              <View
+                style={styles.completenessTrack}
+                accessibilityRole="progressbar"
+                accessibilityLabel="Profile completeness"
+                accessibilityValue={{
+                  min: 0,
+                  max: 100,
+                  now: profileCompleteness.percentage,
+                }}>
+                <View
+                  style={[
+                    styles.completenessFill,
+                    { width: `${profileCompleteness.percentage}%` },
+                  ]}
+                />
+              </View>
+
+              <View style={styles.checklist}>
+                {profileCompleteness.items.map((item) => (
+                  <View key={item.id} style={styles.checklistRow}>
+                    <Ionicons
+                      name={item.completed ? 'checkmark-circle' : 'ellipse-outline'}
+                      size={sizes.iconMd}
+                      color={item.completed ? colors.success : colors.inkFaint}
+                    />
+                    <Text style={[styles.checklistLabel, item.completed && styles.checklistDone]}>
+                      {item.label}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+
+              {profileCompleteness.nextItem ? (
+                <Button
+                  label={profileCompleteness.nextItem.actionLabel}
+                  variant="secondary"
+                  icon="arrow-forward-outline"
+                  onPress={openCompletenessAction}
+                />
+              ) : (
+                <Notice
+                  tone="success"
+                  message="Your profile is complete and ready to build trust with other learners."
+                />
+              )}
             </View>
           </Card>
         </View>
@@ -289,6 +363,53 @@ const styles = StyleSheet.create({
   },
   statsRow: {
     flexDirection: 'row',
+  },
+  completeness: {
+    gap: spacing.lg,
+  },
+  completenessHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  completenessHeading: {
+    flex: 1,
+    gap: spacing.xs,
+  },
+  completenessTitle: {
+    ...type.h2,
+    color: colors.ink,
+  },
+  completenessPercent: {
+    ...type.h1,
+    color: colors.accent,
+  },
+  completenessTrack: {
+    height: spacing.sm,
+    overflow: 'hidden',
+    borderRadius: radius.full,
+    backgroundColor: colors.surfaceAlt,
+  },
+  completenessFill: {
+    height: '100%',
+    borderRadius: radius.full,
+    backgroundColor: colors.accent,
+  },
+  checklist: {
+    gap: spacing.sm,
+  },
+  checklistRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  checklistLabel: {
+    ...type.body,
+    color: colors.ink,
+    flex: 1,
+  },
+  checklistDone: {
+    color: colors.inkMuted,
   },
   stat: {
     flex: 1,

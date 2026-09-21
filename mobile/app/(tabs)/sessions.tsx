@@ -371,29 +371,16 @@ export default function SessionsScreen() {
               ) : (
                 <View style={styles.list}>
                   {pendingRequests.map((booking) => (
-                    <View key={booking.id} style={styles.requestBlock}>
-                      <BookingCard
-                        booking={booking}
-                        counterpart={booking.learnerName}
-                        counterpartAvatarUrl={booking.learnerAvatarUrl}
-                        onPress={() => openBooking(booking.id)}
-                      />
-                      <View style={styles.requestActions}>
-                        <Button
-                          label="Accept"
-                          loading={actingId === booking.id}
-                          onPress={() => void onApprove(booking)}
-                          style={styles.actionHalf}
-                        />
-                        <Button
-                          label="Decline"
-                          variant="danger"
-                          loading={actingId === booking.id}
-                          onPress={() => void onDecline(booking)}
-                          style={styles.actionHalf}
-                        />
-                      </View>
-                    </View>
+                    <BookingCard
+                      key={booking.id}
+                      booking={booking}
+                      counterpart={booking.learnerName}
+                      counterpartAvatarUrl={booking.learnerAvatarUrl}
+                      onPress={() => openBooking(booking.id)}
+                      onAccept={() => void onApprove(booking)}
+                      onDecline={() => void onDecline(booking)}
+                      actionLoading={actingId === booking.id}
+                    />
                   ))}
                 </View>
               )}
@@ -676,9 +663,7 @@ const styles = StyleSheet.create({
   },
   countText: { ...type.caption, color: colors.inkInverse, fontWeight: '700' },
   list: { gap: spacing.md },
-  requestBlock: { gap: spacing.sm },
   offerBlock: { gap: spacing.sm },
   offerActions: { flexDirection: 'row', gap: spacing.md },
-  requestActions: { flexDirection: 'row', gap: spacing.md },
   actionHalf: { flex: 1 },
 });

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BookingCard } from '@/components/session/BookingCard';
@@ -27,7 +27,7 @@ import { errorMessage } from '@/utils/authErrors';
 
 type SessionsView = 'browse' | 'bookings' | 'teaching';
 type BookingFilter = 'upcoming' | 'past' | 'cancelled';
-type TeachingView = 'requests' | 'upcoming';
+type TeachingView = 'requests' | 'sessions' | 'schedule' | 'history';
 
 export default function SessionsScreen() {
   const { profile } = useAuth();
@@ -106,6 +106,9 @@ export default function SessionsScreen() {
   );
   const pendingRequests = teachingBookings.filter((booking) => booking.status === 'pending');
   const scheduledTeaching = teachingBookings.filter((booking) => booking.status === 'confirmed');
+  const teachingHistory = teachingBookings.filter((booking) =>
+    ['completed', 'declined', 'cancelled'].includes(booking.status)
+  );
   const upcomingOffers = myOffers.filter(
     (session) =>
       ['open', 'full'].includes(session.status) &&
@@ -322,15 +325,30 @@ export default function SessionsScreen() {
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           {sessionsError ? <Notice tone="error" message={sessionsError} /> : null}
           <View style={styles.teachingTabs}>
-            <SegmentButton
-              label={`Requests${pendingRequests.length > 0 ? ` (${pendingRequests.length})` : ''}`}
+            <TeachingTab
+              label="Requests"
+              icon="file-tray-full-outline"
+              badge={pendingRequests.length}
               selected={teachingViewTab === 'requests'}
               onPress={() => setTeachingViewTab('requests')}
             />
-            <SegmentButton
-              label="Upcoming"
-              selected={teachingViewTab === 'upcoming'}
-              onPress={() => setTeachingViewTab('upcoming')}
+            <TeachingTab
+              label="My Sessions"
+              icon="calendar-outline"
+              selected={teachingViewTab === 'sessions'}
+              onPress={() => setTeachingViewTab('sessions')}
+            />
+            <TeachingTab
+              label="Schedule"
+              icon="calendar-clear-outline"
+              selected={teachingViewTab === 'schedule'}
+              onPress={() => setTeachingViewTab('schedule')}
+            />
+            <TeachingTab
+              label="History"
+              icon="time-outline"
+              selected={teachingViewTab === 'history'}
+              onPress={() => setTeachingViewTab('history')}
             />
           </View>
 
@@ -380,17 +398,9 @@ export default function SessionsScreen() {
                 </View>
               )}
             </View>
-          ) : (
-            <>
-              {scheduledTeaching.length > 0 ? (
-                <BookingList
-                  title="Confirmed Learners"
-                  bookings={scheduledTeaching}
-                  counterpartRole="learner"
-                />
-              ) : null}
+          ) : teachingViewTab === 'sessions' ? (
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Upcoming Sessions</Text>
+                <Text style={styles.sectionTitle}>My Published Sessions</Text>
                 {upcomingOffers.length === 0 ? (
                   <EmptyState
                     icon="calendar-outline"
@@ -450,7 +460,18 @@ export default function SessionsScreen() {
                   </View>
                 )}
               </View>
-            </>
+          ) : teachingViewTab === 'schedule' ? (
+            <BookingList
+              title="Upcoming Teaching Schedule"
+              bookings={scheduledTeaching}
+              counterpartRole="learner"
+            />
+          ) : (
+            <BookingList
+              title="Teaching History"
+              bookings={teachingHistory}
+              counterpartRole="learner"
+            />
           )}
         </ScrollView>
       ) : null}
@@ -525,6 +546,51 @@ function SegmentButton({ label, selected, onPress }: { label: string; selected: 
   return <Button label={label} variant={selected ? 'secondary' : 'ghost'} onPress={onPress} style={styles.segmentButton} />;
 }
 
+function TeachingTab({
+  label,
+  icon,
+  selected,
+  badge = 0,
+  onPress,
+}: {
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  selected: boolean;
+  badge?: number;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="tab"
+      accessibilityLabel={label}
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.teachingTab,
+        selected && styles.teachingTabSelected,
+        pressed && styles.teachingTabPressed,
+      ]}>
+      <View style={styles.teachingTabIconWrap}>
+        <Ionicons
+          name={icon}
+          size={sizes.iconMd}
+          color={selected ? colors.accent : colors.inkMuted}
+        />
+        {badge > 0 ? (
+          <View style={styles.teachingTabBadge}>
+            <Text style={styles.teachingTabBadgeText}>{badge > 99 ? '99+' : badge}</Text>
+          </View>
+        ) : null}
+      </View>
+      <Text
+        numberOfLines={1}
+        style={[styles.teachingTabLabel, selected && styles.teachingTabLabelSelected]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   segment: {
@@ -559,6 +625,42 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     backgroundColor: colors.accentSurface,
   },
+  teachingTab: {
+    flex: 1,
+    minHeight: 82,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xs,
+    borderRadius: radius.md,
+  },
+  teachingTabSelected: {
+    backgroundColor: colors.surface,
+    shadowColor: colors.ink,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 5,
+    elevation: 3,
+  },
+  teachingTabPressed: { opacity: 0.75 },
+  teachingTabIconWrap: { position: 'relative' },
+  teachingTabLabel: { ...type.caption, color: colors.inkMuted, textAlign: 'center' },
+  teachingTabLabelSelected: { color: colors.accent, fontWeight: '700' },
+  teachingTabBadge: {
+    position: 'absolute',
+    top: -spacing.sm,
+    right: -spacing.md,
+    minWidth: spacing.xl,
+    height: spacing.xl,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xs,
+    borderRadius: radius.full,
+    backgroundColor: colors.danger,
+    borderWidth: 2,
+    borderColor: colors.surface,
+  },
+  teachingTabBadgeText: { ...type.caption, color: colors.inkInverse, fontWeight: '700' },
   filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   section: { gap: spacing.md },
   sectionHeading: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },

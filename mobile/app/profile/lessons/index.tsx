@@ -1,3 +1,5 @@
+import { DeleteLessonButton } from '@/components/lesson/DeleteLessonButton';
+import { EnrollmentCount } from '@/components/lesson/EnrollmentCount';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
@@ -174,6 +176,7 @@ export default function MyLessonsScreen() {
                           <Text style={styles.meta}>
                             {lesson.contents.length} content {lesson.contents.length === 1 ? 'item' : 'items'}
                           </Text>
+                          <EnrollmentCount lessonId={lesson.id} />
 
                           <View style={styles.actions}>
                             <Button
@@ -188,10 +191,8 @@ export default function MyLessonsScreen() {
                               }
                               style={styles.actionButton}
                             />
-                            <Button
-                              label="Delete"
-                              variant="ghost"
-                              icon="trash-outline"
+                            <DeleteLessonButton
+                              lessonId={lesson.id}
                               loading={deletingId === lesson.id}
                               onPress={() => confirmDelete(lesson)}
                               style={styles.actionButton}
@@ -225,6 +226,7 @@ export default function MyLessonsScreen() {
                           <Text style={styles.meta}>
                             {enrollment.contentCount} content {enrollment.contentCount === 1 ? 'item' : 'items'}
                           </Text>
+                          <EnrollmentCount lessonId={enrollment.lessonId} />
                           <ProgressBar
                             progress={enrollment.progress}
                             completed={enrollment.completed}

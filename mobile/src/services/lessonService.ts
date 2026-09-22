@@ -4,6 +4,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  getDocsFromServer,
   increment,
   onSnapshot,
   orderBy,
@@ -20,7 +21,7 @@ import {
 import { careerGoalByTag, type CareerGoalTag } from '@/constants/careerGoals';
 import { FILE_LIMITS } from '@/constants/config';
 import { skillByTag } from '@/constants/skills';
-import { db } from '@/firebase/config';
+import { auth, db } from '@/firebase/config';
 import type { Lesson, LessonContent, LessonEnrollment, User } from '@/types';
 import { deleteFile, sanitizeStorageName, uploadFile } from '@/utils/storage';
 
@@ -506,9 +507,32 @@ export async function updateLesson(teacher: User, lessonId: string, input: Lesso
 }
 
 export async function deleteLesson(teacherId: string, lessonId: string): Promise<void> {
-  const existing = await getLesson(lessonId);
+  if (auth.currentUser?.uid !== teacherId) throw new Error('Sign in as the lesson creator to delete it.');
+  const blocked = 'This lesson cannot be deleted because learners are currently enrolled.';
+  if (await getLessonEnrollmentCount(lessonId) > 0) throw new Error(blocked);
+  const lessonRef = doc(db, 'lessons', lessonId);
+  const existing = await runTransaction(db, async (transaction) => {
+    const [snapshot, teacher] = await Promise.all([
+      transaction.get(lessonRef), transaction.get(doc(db, 'users', teacherId)),
+    ]);
+    if (!snapshot.exists()) return null;
+    const lesson = normalizeLesson({ ...snapshot.data(), id: snapshot.id });
+    if (lesson.teacherId !== teacherId || !['teacher', 'both'].includes(teacher.data()?.role)) {
+      throw new Error('Only the teacher who created this lesson can delete it.');
+    }
+    if (snapshot.data().deleting === true) throw new Error('Lesson deletion is already in progress.');
+    // Enrollment transactions read this document and retry/reject after this lock.
+    transaction.update(lessonRef, { deleting: true });
+    return lesson;
+  });
   if (!existing) return;
-  if (existing.teacherId !== teacherId) throw new Error('Only the teacher who created this lesson can delete it.');
+  try {
+    // Catch enrollments committed between the initial query and acquiring the lock.
+    if (await getLessonEnrollmentCount(lessonId) > 0) throw new Error(blocked);
+  } catch (error) {
+    await updateDoc(lessonRef, { deleting: false });
+    throw error;
+  }
 
   // Remove the lesson from learner queries before any irreversible cleanup.
   await updateDoc(doc(db, 'lessons', lessonId), {
@@ -517,12 +541,9 @@ export async function deleteLesson(teacherId: string, lessonId: string): Promise
     updatedAt: serverTimestamp(),
   });
 
-  const [enrollmentsSnapshot, progressSnapshot] = await Promise.all([
-    getDocs(query(enrollmentsCol, where('lessonId', '==', lessonId))),
-    getDocs(query(lessonProgressCol, where('lessonId', '==', lessonId))),
-  ]);
+  const progressSnapshot = await getDocsFromServer(query(lessonProgressCol, where('lessonId', '==', lessonId)));
 
-  const relatedDocs = [...enrollmentsSnapshot.docs, ...progressSnapshot.docs];
+  const relatedDocs = progressSnapshot.docs;
   const maxBatchWrites = 500;
 
   for (let start = 0; start < relatedDocs.length; start += maxBatchWrites) {
@@ -534,14 +555,37 @@ export async function deleteLesson(teacherId: string, lessonId: string): Promise
   }
 
   await Promise.all(
-    existing.contents.flatMap((item) =>
-      item.type === 'pdf' && item.filePath ? [deleteFile(item.filePath)] : []
-    )
+    existing.contents.flatMap((item) => {
+      if (item.type !== 'pdf' || !item.filePath) return [];
+      const parts = item.filePath.split('/');
+      return parts.length === 4 && parts[0] === 'lesson-files' && parts[1] === teacherId &&
+        parts[2].endsWith(`-${lessonId}`) ? [deleteFile(item.filePath)] : [];
+    })
   );
   await deleteDoc(doc(db, 'lessons', lessonId));
 }
 
 export const enrollmentIdFor = (userId: string, lessonId: string): string => `${userId}_${lessonId}`;
+
+/** Completed learners remain enrolled. Legacy duplicates count only once. */
+export function countEnrolledUsers(records: Record<string, unknown>[]): number {
+  return new Set(records.filter((row) =>
+    typeof row.userId === 'string' && row.userId.length > 0 && row.active !== false &&
+    !['cancelled', 'canceled', 'removed', 'unenrolled'].includes(String(row.status))
+  ).map((row) => row.userId)).size;
+}
+
+export async function getLessonEnrollmentCount(lessonId: string): Promise<number> {
+  const snapshot = await getDocsFromServer(query(enrollmentsCol, where('lessonId', '==', lessonId)));
+  return countEnrolledUsers(snapshot.docs.map((row) => row.data()));
+}
+
+export function subscribeToLessonEnrollmentCount(
+  lessonId: string, onValue: (count: number) => void, onError: (error: Error) => void
+): () => void {
+  return onSnapshot(query(enrollmentsCol, where('lessonId', '==', lessonId)),
+    (snapshot) => onValue(countEnrolledUsers(snapshot.docs.map((row) => row.data()))), onError);
+}
 
 export async function getEnrollment(userId: string, lessonId: string): Promise<LessonEnrollment | null> {
   const snapshot = await getDoc(doc(db, 'enrollments', enrollmentIdFor(userId, lessonId)));

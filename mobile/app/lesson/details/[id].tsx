@@ -1,3 +1,4 @@
+import { EnrollmentCount } from '@/components/lesson/EnrollmentCount';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
@@ -99,6 +100,7 @@ export default function LessonDetailsScreen() {
 
             <Card>
               <View style={styles.infoCard}>
+                <EnrollmentCount lessonId={lesson.id} />
                 <InfoRow icon="flag-outline" label="Career Goal" value={lesson.careerGoalName || 'Not specified'} />
                 <Pressable
                   onPress={() => router.push({ pathname: '/user/[id]', params: { id: lesson.teacherId } })}

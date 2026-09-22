@@ -1,3 +1,4 @@
+import { EnrollmentCount } from '@/components/lesson/EnrollmentCount';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
@@ -138,6 +139,7 @@ export default function FeedScreen() {
                       <Text style={styles.caption}>
                         {lesson.contents.length} content {lesson.contents.length === 1 ? 'item' : 'items'}
                       </Text>
+                          <EnrollmentCount lessonId={lesson.id} />
                       {learnerGoals.has(lesson.careerGoalId) ? (
                         <Text style={styles.match}>Your goal</Text>
                       ) : null}

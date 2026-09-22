@@ -1,3 +1,4 @@
+import { EnrollmentCount } from '@/components/lesson/EnrollmentCount';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
@@ -333,6 +334,7 @@ export default function UserProfileScreen() {
                         <Text style={styles.lessonMeta}>
                           {lesson.contents.length} content {lesson.contents.length === 1 ? 'item' : 'items'}
                         </Text>
+                          <EnrollmentCount lessonId={lesson.id} />
 
                         {enrollment ? (
                           <ProgressBar

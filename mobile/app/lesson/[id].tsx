@@ -1,3 +1,4 @@
+import { EnrollmentCount } from '@/components/lesson/EnrollmentCount';
 import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -123,6 +124,7 @@ export default function LessonDetailScreen() {
                 <Text style={styles.meta}>
                   {lesson.contents.length} content {lesson.contents.length === 1 ? 'item' : 'items'}
                 </Text>
+                          <EnrollmentCount lessonId={lesson.id} />
                 {enrollment ? (
                   <ProgressBar progress={enrollment.progress} completed={enrollment.completed} />
                 ) : null}

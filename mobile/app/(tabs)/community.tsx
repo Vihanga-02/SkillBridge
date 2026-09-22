@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ChatListRow } from '@/components/community/ChatListRow';
+import { CommunityFeed } from '@/components/community/CommunityFeed';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { LoadingState } from '@/components/ui/LoadingState';
@@ -66,7 +67,7 @@ export default function CommunityScreen() {
       </View>
 
       {activeTab === 'feed' ? (
-        <FeedPending />
+        <CommunityFeed />
       ) : loadingChats ? (
         <LoadingState label="Loading chats…" />
       ) : chatError ? (
@@ -125,18 +126,6 @@ function CommunityTabButton({
       style={({ pressed }) => [styles.tab, selected && styles.tabSelected, pressed && styles.tabPressed]}>
       <Text style={[styles.tabText, selected && styles.tabTextSelected]}>{label}</Text>
     </Pressable>
-  );
-}
-
-function FeedPending() {
-  return (
-    <View style={styles.empty}>
-      <EmptyState
-        icon="newspaper-outline"
-        title="Community posts are next"
-        message="Tips, questions and achievements will appear here once the post feed is ready."
-      />
-    </View>
   );
 }
 

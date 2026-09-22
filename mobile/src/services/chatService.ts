@@ -13,6 +13,7 @@ import {
   query,
   runTransaction,
   serverTimestamp,
+  where,
   type DocumentData,
   type QueryDocumentSnapshot,
   type Unsubscribe,
@@ -122,6 +123,34 @@ export function subscribeToChat(
 }
 
 /**
+ * Streams the signed-in user's conversations in the same order users expect
+ * from a messaging inbox: most recently active first. This query needs the
+ * `participantIds (array-contains) + lastMessageAt desc` composite index.
+ */
+export function subscribeToMyChats(
+  uid: string,
+  onNext: (chats: Chat[]) => void,
+  onError?: (error: unknown) => void
+): Unsubscribe {
+  if (!uid) {
+    onNext([]);
+    return () => undefined;
+  }
+
+  const chatsQuery = query(
+    collection(db, 'chats'),
+    where('participantIds', 'array-contains', uid),
+    orderBy('lastMessageAt', 'desc')
+  );
+
+  return onSnapshot(
+    chatsQuery,
+    (snapshot) => onNext(snapshot.docs.map((chat) => toChat(chat.data(), chat.id))),
+    (error) => onError?.(error)
+  );
+}
+
+/**
  * Streams the newest message page in chronological order.
  */
 export function subscribeToMessages(
@@ -140,6 +169,37 @@ export function subscribeToMessages(
     (snapshot) => onNext(snapshot.docs.map(toMessage).reverse()),
     (error) => onError?.(error)
   );
+}
+
+/**
+ * Resets only the opening participant's unread count. The transaction makes
+ * this safe when a new message arrives at the same time as the thread opens.
+ */
+export async function markChatRead(chatId: string, uid: string): Promise<void> {
+  if (!chatId || !uid) return;
+
+  const chatRef = doc(db, 'chats', chatId);
+
+  await runTransaction(db, async (transaction) => {
+    const chatSnapshot = await transaction.get(chatRef);
+    if (!chatSnapshot.exists()) {
+      throw new Error('This conversation is no longer available.');
+    }
+
+    const chat = toChat(chatSnapshot.data(), chatSnapshot.id);
+    if (!chat.participantIds.includes(uid)) {
+      throw new Error('You cannot open this conversation.');
+    }
+
+    if ((chat.unreadCount?.[uid] ?? 0) === 0) return;
+
+    transaction.update(chatRef, {
+      unreadCount: {
+        ...(chat.unreadCount ?? {}),
+        [uid]: 0,
+      },
+    });
+  });
 }
 
 /**

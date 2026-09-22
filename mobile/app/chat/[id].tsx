@@ -1,9 +1,10 @@
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   StyleSheet,
   TextInput,
   View,
@@ -20,8 +21,8 @@ import { Notice } from '@/components/ui/Notice';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { colors, radius, sizes, spacing, type } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
-import { sendMessage, subscribeToChat, subscribeToMessages } from '@/services/chatService';
-import type { ChatParticipant, Message } from '@/types';
+import { markChatRead, sendMessage, subscribeToChat, subscribeToMessages } from '@/services/chatService';
+import type { Chat, Message } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
 
 export default function ChatThreadScreen() {
@@ -31,9 +32,7 @@ export default function ChatThreadScreen() {
   const nameFromRoute = typeof participantName === 'string' ? participantName : '';
 
   const [messages, setMessages] = useState<Message[]>([]);
-  const [chat, setChat] = useState<{
-    participants: Record<string, ChatParticipant>;
-  } | null>(null);
+  const [chat, setChat] = useState<Chat | null>(null);
   const [loading, setLoading] = useState(true);
   const [threadExists, setThreadExists] = useState<boolean | null>(null);
   const [threadError, setThreadError] = useState<string | null>(null);
@@ -78,9 +77,22 @@ export default function ChatThreadScreen() {
     };
   }, [chatId, retryKey]);
 
-  const otherParticipant = useMemo(() => {
-    const participant = Object.entries(chat?.participants ?? {}).find(([uid]) => uid !== profile?.uid)?.[1];
-    return participant ?? { name: nameFromRoute || 'Direct message', avatarUrl: '' };
+  useEffect(() => {
+    if (!profile || !chat || !chatId || (chat.unreadCount?.[profile.uid] ?? 0) === 0) return;
+
+    void markChatRead(chatId, profile.uid).catch((error: unknown) => {
+      setThreadError(errorMessage(error));
+    });
+  }, [chat, chatId, profile]);
+
+  const { otherParticipant, otherParticipantId } = useMemo(() => {
+    const entry = Object.entries(chat?.participants ?? {}).find(([uid]) => uid !== profile?.uid);
+    const [participantId, participant] = entry ?? [];
+
+    return {
+      otherParticipant: participant ?? { name: nameFromRoute || 'Direct message', avatarUrl: '' },
+      otherParticipantId: participantId ?? null,
+    };
   }, [chat, nameFromRoute, profile?.uid]);
 
   async function handleSend() {
@@ -127,7 +139,23 @@ export default function ChatThreadScreen() {
           title="Chat"
           subtitle={otherParticipant.name}
           showBack
-          action={<Avatar name={otherParticipant.name} uri={otherParticipant.avatarUrl || undefined} size="sm" />}
+          action={
+            otherParticipantId ? (
+              <Pressable
+                onPress={() => router.push(`/user/${otherParticipantId}`)}
+                accessibilityRole="button"
+                accessibilityLabel={`Open ${otherParticipant.name}'s profile`}
+                style={styles.profileAction}>
+                <Avatar
+                  name={otherParticipant.name}
+                  uri={otherParticipant.avatarUrl || undefined}
+                  size="sm"
+                />
+              </Pressable>
+            ) : (
+              <Avatar name={otherParticipant.name} uri={otherParticipant.avatarUrl || undefined} size="sm" />
+            )
+          }
         />
 
         {threadError && !showFatalError ? (
@@ -200,6 +228,12 @@ const styles = StyleSheet.create({
   },
   notice: {
     paddingHorizontal: spacing.lg,
+  },
+  profileAction: {
+    width: sizes.touchMin,
+    height: sizes.touchMin,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   messages: {
     flexGrow: 1,

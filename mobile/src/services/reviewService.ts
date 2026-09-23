@@ -8,6 +8,28 @@ import type { Booking, Review, User } from '@/types';
 
 export type LearnerReviewer = Pick<User, 'uid' | 'name' | 'avatarUrl'>;
 
+/** Stable values stored in Firestore; labels are only for the review form UI. */
+export const REVIEW_TAGS = [
+  { value: 'punctual', label: 'Punctual' },
+  { value: 'explained-clearly', label: 'Explained clearly' },
+  { value: 'helpful', label: 'Helpful' },
+  { value: 'friendly', label: 'Friendly' },
+] as const;
+
+export type ReviewTag = (typeof REVIEW_TAGS)[number]['value'];
+
+const REVIEW_TAG_VALUES = new Set<string>(REVIEW_TAGS.map((tag) => tag.value));
+
+function validateReviewTags(rawTags: readonly string[]): ReviewTag[] {
+  const tags = [...new Set(rawTags.map((tag) => tag.trim()).filter(Boolean))];
+
+  if (tags.some((tag) => !REVIEW_TAG_VALUES.has(tag))) {
+    throw new Error('Choose feedback tags from the available options.');
+  }
+
+  return tags as ReviewTag[];
+}
+
 /** One learner can review a session once, even if they retry the submission. */
 export const reviewIdFor = (sessionId: string, reviewerId: string): string =>
   `${sessionId}_${reviewerId}`;
@@ -21,7 +43,8 @@ export async function submitLearnerReview(
   bookingId: string,
   reviewer: LearnerReviewer,
   rating: number,
-  rawComment: string
+  rawComment: string,
+  rawTags: readonly string[] = []
 ): Promise<string> {
   if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
     throw new Error('Choose a rating from 1 to 5 stars.');
@@ -31,6 +54,7 @@ export async function submitLearnerReview(
   if (comment.length > TEXT_LIMITS.reviewComment) {
     throw new Error(`Your review must be ${TEXT_LIMITS.reviewComment} characters or fewer.`);
   }
+  const tags = validateReviewTags(rawTags);
 
   const bookingRef = doc(db, 'bookings', bookingId);
   let reviewId = '';
@@ -88,7 +112,7 @@ export async function submitLearnerReview(
       toUserId: booking.teacherId,
       rating,
       comment,
-      tags: [],
+      tags,
       role: 'learner_to_teacher',
       createdAt: serverTimestamp(),
     };

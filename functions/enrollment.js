@@ -63,36 +63,67 @@ function createOperations(db, FieldValue, HttpsError, bucket) {
   async function deleteLesson(request) {
     const { uid, lessonId } = identity(request);
     const lessonRef = db.doc(`lessons/${lessonId}`);
-    const lesson = await db.runTransaction(async (tx) => {
+    async function verifyDeletion(tx) {
       const snapshot = await tx.get(lessonRef);
       const user = await tx.get(db.doc(`users/${uid}`));
+      if (!['teacher', 'both'].includes(user.data()?.role)) {
+        fail('permission-denied', 'Only the teacher who created this lesson can delete it.');
+      }
+      // A lost success response can be retried after the document is gone.
       if (!snapshot.exists) return null;
       const data = snapshot.data();
-      if ((data.teacherId ?? data.ownerId) !== uid || !['teacher', 'both'].includes(user.data()?.role)) {
+      if ((data.teacherId ?? data.ownerId) !== uid) {
         fail('permission-denied', 'Only the teacher who created this lesson can delete it.');
       }
       // Any record blocks deletion, including inactive or malformed legacy ones.
       const records = await tx.get(enrollmentQuery(lessonId).limit(1));
       if (!records.empty) fail('failed-precondition', 'This lesson cannot be deleted because learners are currently enrolled.');
+      return data;
+    }
+    const lesson = await db.runTransaction(async (tx) => {
+      const data = await verifyDeletion(tx);
+      if (!data) return null;
+      // This is a durable cleanup marker, not an exclusive attempt lock. Old
+      // deleting=true documents and overlapping owner retries follow this path.
       tx.update(lessonRef, { deleting: true, published: false });
       return data;
     });
     if (!lesson) return { deleted: true };
-    // The lock remains on failure; the owner can safely retry cleanup.
-    const progress = await db.collection('lessonProgress').where('lessonId', '==', lessonId).get();
-    for (let i = 0; i < progress.docs.length; i += 500) {
+    // Never clear the marker after partial cleanup: another attempt may still
+    // be running, and republishing would expose incomplete lesson content.
+    // Requery remaining records in bounded batches. Missing records are safe.
+    const progressQuery = db.collection('lessonProgress').where('lessonId', '==', lessonId).limit(500);
+    while (true) {
+      const progress = await progressQuery.get();
+      if (progress.empty) break;
       const batch = db.batch();
-      progress.docs.slice(i, i + 500).forEach((row) => batch.delete(row.ref));
+      progress.docs.forEach((row) => batch.delete(row.ref));
       await batch.commit();
     }
     for (const item of lesson.contents ?? []) {
       if (item.type !== 'pdf' || typeof item.filePath !== 'string') continue;
       const parts = item.filePath.split('/');
       if (parts.length === 4 && parts[0] === 'lesson-files' && parts[1] === uid && parts[2].endsWith(`-${lessonId}`)) {
-        await bucket().file(item.filePath).delete({ ignoreNotFound: true });
+        const storageBucket = bucket();
+        try {
+          await storageBucket.file(item.filePath).delete();
+        } catch (error) {
+          if (error.code !== 404) throw error;
+          // A 404 can also mean the bucket is missing/misconfigured. Confirm
+          // the bucket is accessible before accepting an absent object as done.
+          // Permission, configuration and transport failures still propagate.
+          await storageBucket.getMetadata();
+        }
       }
     }
-    await lessonRef.delete();
+    // Storage is outside Firestore transactions. Revalidate after cleanup and
+    // delete last; if this commit fails, repeating cleanup remains safe.
+    await db.runTransaction(async (tx) => {
+      const current = await verifyDeletion(tx);
+      if (!current) return; // Another owner attempt already finished.
+      if (current.deleting !== true) fail('failed-precondition', 'Lesson deletion state changed. Retry deletion.');
+      tx.delete(lessonRef);
+    });
     return { deleted: true };
   }
 

@@ -2,7 +2,7 @@ import { DeleteLessonButton } from '@/components/lesson/DeleteLessonButton';
 import { EnrollmentCount } from '@/components/lesson/EnrollmentCount';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -28,6 +28,8 @@ export default function MyLessonsScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const deletionInFlight = useRef(false);
+  const [failedDeletions, setFailedDeletions] = useState<Set<string>>(() => new Set());
   const [activeTab, setActiveTab] = useState<LessonTab>('created');
 
   const canTeach = profile?.role === 'teacher' || profile?.role === 'both';
@@ -72,6 +74,8 @@ export default function MyLessonsScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
+            if (deletionInFlight.current) return;
+            deletionInFlight.current = true;
             setDeletingId(lesson.id);
             setError(null);
             try {
@@ -79,7 +83,9 @@ export default function MyLessonsScreen() {
               setCreatedLessons((current) => current.filter((item) => item.id !== lesson.id));
             } catch (deleteError) {
               setError(errorMessage(deleteError));
+              setFailedDeletions((current) => new Set(current).add(lesson.id));
             } finally {
+              deletionInFlight.current = false;
               setDeletingId(null);
             }
           },
@@ -194,6 +200,7 @@ export default function MyLessonsScreen() {
                             <DeleteLessonButton
                               lessonId={lesson.id}
                               loading={deletingId === lesson.id}
+                              retry={lesson.deleting === true || failedDeletions.has(lesson.id)}
                               onPress={() => confirmDelete(lesson)}
                               style={styles.actionButton}
                             />

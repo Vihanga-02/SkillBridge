@@ -71,3 +71,44 @@ test('real enrollment/delete race never leaves an orphan enrollment', async () =
   const enrollment = await db.doc('enrollments/a_l').get();
   assert.equal(lesson.exists, enrollment.exists);
 });
+
+test('partial cleanup retries against real Firestore, including a legacy marker', async () => {
+  const paths = ['a', 'b'].map((name) => `lesson-files/t/title-l/${name}.pdf`);
+  const files = new Set(paths);
+  let failStorage = true;
+  const recovering = createOperations(db, FieldValue, HttpsError, () => ({ getMetadata: async () => [{}], file: (path) => ({
+    delete: async () => {
+      if (path === paths[1] && failStorage) throw new Error('storage unavailable');
+      if (!files.has(path)) throw Object.assign(new Error('Object not found'), { code: 404 });
+      files.delete(path);
+    },
+  }) }));
+  await db.doc('lessons/l').update({ deleting: true, published: false, contents: paths.map((filePath) => ({ type: 'pdf', filePath })) });
+  await db.doc('lessonProgress/legacy').set({ lessonId: 'l' });
+  await assert.rejects(recovering.deleteLesson(request('t')), /storage unavailable/);
+  assert.equal((await db.doc('lessons/l').get()).data().deleting, true);
+  assert.equal((await db.doc('lessonProgress/legacy').get()).exists, false);
+  assert.equal(files.size, 1);
+  const teacher = env.authenticatedContext('t').firestore();
+  await assertSucceeds(getDoc(doc(teacher, 'lessons/l')));
+  await assertFails(updateDoc(doc(teacher, 'lessons/l'), { deleting: false, published: true }));
+  await assert.rejects(recovering.deleteLesson(request('b')), /Only the teacher/);
+  await db.doc('enrollments/late').set({ lessonId: 'l', userId: 'a' });
+  await assert.rejects(recovering.deleteLesson(request('t')), /currently enrolled/);
+  assert.equal(files.size, 1);
+  await db.doc('enrollments/late').delete();
+  failStorage = false;
+  await recovering.deleteLesson(request('t'));
+  await recovering.deleteLesson(request('t'));
+  assert.equal((await db.doc('lessons/l').get()).exists, false);
+  assert.equal(files.size, 0);
+});
+
+test('overlapping owner requests can both complete against real Firestore', async () => {
+  await db.doc('lessons/l').update({ deleting: true, published: false });
+  await db.doc('lessonProgress/legacy').set({ lessonId: 'l' });
+  const results = await Promise.all([ops.deleteLesson(request('t')), ops.deleteLesson(request('t'))]);
+  assert.deepEqual(results, [{ deleted: true }, { deleted: true }]);
+  assert.equal((await db.doc('lessons/l').get()).exists, false);
+  assert.equal((await db.doc('lessonProgress/legacy').get()).exists, false);
+});

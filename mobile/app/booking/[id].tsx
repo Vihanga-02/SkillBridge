@@ -26,6 +26,7 @@ import {
   markCompleted,
   SESSION_COMPLETION_CREDITS,
 } from '@/services/bookingService';
+import { ensureDirectChat } from '@/services/chatService';
 import type { Booking } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
 import {
@@ -43,6 +44,8 @@ export default function BookingDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [acting, setActing] = useState(false);
+  const [messageLoading, setMessageLoading] = useState(false);
+  const [messageError, setMessageError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!id) {
@@ -92,6 +95,36 @@ export default function BookingDetailScreen() {
     }
   }
 
+  async function openDirectChat() {
+    if (!profile || !booking || (!isTeacher && !isLearner)) return;
+
+    const otherParticipant = isTeacher
+      ? {
+          uid: booking.learnerId,
+          name: booking.learnerName,
+          avatarUrl: booking.learnerAvatarUrl,
+        }
+      : {
+          uid: booking.teacherId,
+          name: booking.teacherName,
+          avatarUrl: booking.teacherAvatarUrl,
+        };
+
+    setMessageError(null);
+    setMessageLoading(true);
+    try {
+      const chatId = await ensureDirectChat(profile, otherParticipant);
+      router.push({
+        pathname: '../chat/[id]',
+        params: { id: chatId, participantName: otherParticipant.name },
+      });
+    } catch (chatError) {
+      setMessageError(errorMessage(chatError));
+    } finally {
+      setMessageLoading(false);
+    }
+  }
+
   if (loading) {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
@@ -118,6 +151,7 @@ export default function BookingDetailScreen() {
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {error ? <Notice tone="error" message={error} /> : null}
+        {messageError ? <Notice tone="error" message={messageError} /> : null}
 
         <Card>
           <View style={styles.block}>
@@ -180,6 +214,16 @@ export default function BookingDetailScreen() {
               label="Join Meeting"
               icon="videocam-outline"
               onPress={() => void Linking.openURL(booking.meetingLink)}
+            />
+          ) : null}
+
+          {isTeacher || isLearner ? (
+            <Button
+              label={isTeacher ? 'Message learner' : 'Message teacher'}
+              variant="secondary"
+              icon="chatbubble-outline"
+              loading={messageLoading}
+              onPress={() => void openDirectChat()}
             />
           ) : null}
 

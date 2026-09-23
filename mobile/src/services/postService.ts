@@ -13,6 +13,7 @@ import {
   serverTimestamp,
   startAfter,
   where,
+  writeBatch,
   type DocumentData,
   type QueryConstraint,
   type QueryDocumentSnapshot,
@@ -45,6 +46,20 @@ export type PostPage = {
   posts: Post[];
   cursor: PostCursor;
 };
+
+export type CommentCursor = QueryDocumentSnapshot<DocumentData> | null;
+
+export type ListCommentsOptions = {
+  pageSize?: number;
+  cursor?: CommentCursor;
+};
+
+export type CommentPage = {
+  comments: Comment[];
+  cursor: CommentCursor;
+};
+
+const COMMENT_DELETE_BATCH_SIZE = 450;
 
 const toPost = (snapshot: QueryDocumentSnapshot<DocumentData>): Post =>
   ({ ...snapshot.data(), id: snapshot.id }) as Post;
@@ -176,7 +191,9 @@ export async function addComment(postId: string, author: PostAuthor, rawText: st
 
   await runTransaction(db, async (transaction) => {
     const postSnapshot = await transaction.get(postRef);
-    if (!postSnapshot.exists()) throw new Error('This post is no longer available.');
+    if (!postSnapshot.exists() || postSnapshot.data().deleting === true) {
+      throw new Error('This post is no longer available.');
+    }
 
     transaction.set(commentRef, {
       id: commentRef.id,
@@ -192,27 +209,84 @@ export async function addComment(postId: string, author: PostAuthor, rawText: st
   return commentRef.id;
 }
 
-export async function listComments(postId: string): Promise<Comment[]> {
-  const commentsQuery = query(
-    collection(db, 'posts', postId, 'comments'),
-    orderBy('createdAt', 'asc'),
-    limit(PAGE_SIZE.comments)
-  );
-  const snapshot = await getDocs(commentsQuery);
-  return snapshot.docs.map(toComment);
+/**
+ * Gets the newest comments first. The cursor lets the detail screen load older
+ * comments instead of permanently hiding comments after the first page.
+ */
+export async function listComments(
+  postId: string,
+  { pageSize = PAGE_SIZE.comments, cursor = null }: ListCommentsOptions = {}
+): Promise<CommentPage> {
+  const safePageSize = Math.max(1, Math.min(pageSize, PAGE_SIZE.comments));
+  const constraints: QueryConstraint[] = [orderBy('createdAt', 'desc')];
+  if (cursor) constraints.push(startAfter(cursor));
+  constraints.push(limit(safePageSize + 1));
+
+  const snapshot = await getDocs(query(collection(db, 'posts', postId, 'comments'), ...constraints));
+  const visible = snapshot.docs.slice(0, safePageSize);
+
+  return {
+    comments: visible.map(toComment),
+    cursor: snapshot.docs.length > safePageSize ? visible[visible.length - 1] ?? null : null,
+  };
 }
 
-/** The Firestore rule repeats this author check; the client check gives a useful error. */
+/**
+ * Removes the post and every nested comment. Firestore does not cascade a
+ * document delete into subcollections, so the post is first marked as deleting
+ * to reject new comments while batched cleanup runs. The final security rules
+ * must let a post author delete comments belonging to their own post.
+ */
 export async function deletePost(postId: string, authorId: string): Promise<void> {
   const postRef = doc(postsCol, postId);
+  const commentsCol = collection(postRef, 'comments');
+  let deletionStarted = false;
 
-  await runTransaction(db, async (transaction) => {
-    const snapshot = await transaction.get(postRef);
-    if (!snapshot.exists()) throw new Error('This post is no longer available.');
-    if (snapshot.data().authorId !== authorId) {
-      throw new Error('Only the author can delete this post.');
+  try {
+    await runTransaction(db, async (transaction) => {
+      const snapshot = await transaction.get(postRef);
+      if (!snapshot.exists()) throw new Error('This post is no longer available.');
+      if (snapshot.data().authorId !== authorId) {
+        throw new Error('Only the author can delete this post.');
+      }
+      if (snapshot.data().deleting === true) {
+        throw new Error('This post is already being deleted.');
+      }
+
+      transaction.update(postRef, { deleting: true });
+    });
+    deletionStarted = true;
+
+    // Querying a limited page again after deleting it walks the entire
+    // subcollection without exceeding Firestore's 500-operation batch limit.
+    while (true) {
+      const snapshot = await getDocs(query(commentsCol, limit(COMMENT_DELETE_BATCH_SIZE)));
+      if (snapshot.empty) break;
+
+      const batch = writeBatch(db);
+      snapshot.docs.forEach((comment) => batch.delete(comment.ref));
+      await batch.commit();
     }
 
-    transaction.delete(postRef);
-  });
+    await runTransaction(db, async (transaction) => {
+      const snapshot = await transaction.get(postRef);
+      if (!snapshot.exists()) return;
+      if (snapshot.data().authorId !== authorId) {
+        throw new Error('Only the author can delete this post.');
+      }
+
+      transaction.delete(postRef);
+    });
+  } catch (error) {
+    // A failed cleanup must not leave a normal post permanently unavailable.
+    if (deletionStarted) {
+      await runTransaction(db, async (transaction) => {
+        const snapshot = await transaction.get(postRef);
+        if (snapshot.exists() && snapshot.data().authorId === authorId && snapshot.data().deleting === true) {
+          transaction.update(postRef, { deleting: false });
+        }
+      }).catch(() => undefined);
+    }
+    throw error;
+  }
 }

@@ -1,6 +1,8 @@
+import { useIsFocused } from '@react-navigation/native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AppState,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -28,6 +30,7 @@ import { errorMessage } from '@/utils/authErrors';
 export default function ChatThreadScreen() {
   const { id, participantName } = useLocalSearchParams<{ id: string; participantName?: string }>();
   const { profile } = useAuth();
+  const isFocused = useIsFocused();
   const chatId = typeof id === 'string' ? id : '';
   const nameFromRoute = typeof participantName === 'string' ? participantName : '';
 
@@ -36,6 +39,7 @@ export default function ChatThreadScreen() {
   const [loading, setLoading] = useState(true);
   const [threadExists, setThreadExists] = useState<boolean | null>(null);
   const [threadError, setThreadError] = useState<string | null>(null);
+  const [appState, setAppState] = useState(AppState.currentState);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
@@ -78,12 +82,26 @@ export default function ChatThreadScreen() {
   }, [chatId, retryKey]);
 
   useEffect(() => {
-    if (!profile || !chat || !chatId || (chat.unreadCount?.[profile.uid] ?? 0) === 0) return;
+    const subscription = AppState.addEventListener('change', setAppState);
+    return () => subscription.remove();
+  }, []);
+
+  useEffect(() => {
+    if (
+      !profile ||
+      !chat ||
+      !chatId ||
+      !isFocused ||
+      appState !== 'active' ||
+      (chat.unreadCount?.[profile.uid] ?? 0) === 0
+    ) {
+      return;
+    }
 
     void markChatRead(chatId, profile.uid).catch((error: unknown) => {
       setThreadError(errorMessage(error));
     });
-  }, [chat, chatId, profile]);
+  }, [appState, chat, chatId, isFocused, profile]);
 
   const { otherParticipant, otherParticipantId } = useMemo(() => {
     const entry = Object.entries(chat?.participants ?? {}).find(([uid]) => uid !== profile?.uid);

@@ -25,7 +25,14 @@ import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { TEXT_LIMITS } from '@/constants/config';
 import { colors, radius, sizes, spacing, type } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
-import { addComment, deletePost, getPost, listComments, toggleLike } from '@/services/postService';
+import {
+  addComment,
+  deletePost,
+  getPost,
+  listComments,
+  toggleLike,
+  type CommentCursor,
+} from '@/services/postService';
 import type { Comment, Post } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
 
@@ -35,6 +42,9 @@ export default function PostDetailScreen() {
   const postId = typeof id === 'string' ? id : '';
   const [post, setPost] = useState<Post | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
+  const [commentCursor, setCommentCursor] = useState<CommentCursor>(null);
+  const [hasMoreComments, setHasMoreComments] = useState(false);
+  const [loadingMoreComments, setLoadingMoreComments] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -53,9 +63,11 @@ export default function PostDetailScreen() {
     setLoading(true);
     setLoadError(null);
     try {
-      const [nextPost, nextComments] = await Promise.all([getPost(postId), listComments(postId)]);
+      const [nextPost, commentPage] = await Promise.all([getPost(postId), listComments(postId)]);
       setPost(nextPost);
-      setComments(nextComments);
+      setComments(commentPage.comments);
+      setCommentCursor(commentPage.cursor);
+      setHasMoreComments(commentPage.cursor !== null);
     } catch (error) {
       setLoadError(errorMessage(error));
     } finally {
@@ -96,8 +108,10 @@ export default function PostDetailScreen() {
     try {
       await addComment(post.id, profile, comment);
       setComment('');
-      const nextComments = await listComments(post.id);
-      setComments(nextComments);
+      const commentPage = await listComments(post.id);
+      setComments(commentPage.comments);
+      setCommentCursor(commentPage.cursor);
+      setHasMoreComments(commentPage.cursor !== null);
       setPost((current) =>
         current ? { ...current, commentCount: (current.commentCount ?? 0) + 1 } : current
       );
@@ -105,6 +119,23 @@ export default function PostDetailScreen() {
       setActionError(errorMessage(error));
     } finally {
       setCommenting(false);
+    }
+  }
+
+  async function loadMoreComments() {
+    if (!post || !commentCursor || loadingMoreComments) return;
+
+    setActionError(null);
+    setLoadingMoreComments(true);
+    try {
+      const commentPage = await listComments(post.id, { cursor: commentCursor });
+      setComments((current) => [...current, ...commentPage.comments]);
+      setCommentCursor(commentPage.cursor);
+      setHasMoreComments(commentPage.cursor !== null);
+    } catch (error) {
+      setActionError(errorMessage(error));
+    } finally {
+      setLoadingMoreComments(false);
     }
   }
 
@@ -206,6 +237,16 @@ export default function PostDetailScreen() {
               title="No comments yet"
               message="Start the conversation with a helpful comment."
             />
+          }
+          ListFooterComponent={
+            hasMoreComments ? (
+              <Button
+                label="Load older comments"
+                variant="secondary"
+                loading={loadingMoreComments}
+                onPress={() => void loadMoreComments()}
+              />
+            ) : null
           }
         />
 

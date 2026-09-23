@@ -12,8 +12,10 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   updateDoc,
   where,
@@ -52,6 +54,8 @@ export type CreateSessionInput = {
   capacity: number;
 };
 
+export type EditableSession = Session & { meetingLink: string };
+
 const sessionsCol = collection(db, 'sessions');
 
 const toSession = (snapshot: QueryDocumentSnapshot<DocumentData>): Session =>
@@ -66,6 +70,42 @@ function parseLocalStart(date: string, time: string): Date {
 export async function getSession(sessionId: string): Promise<Session | null> {
   const snapshot = await getDoc(doc(db, 'sessions', sessionId));
   return snapshot.exists() ? ({ ...snapshot.data(), id: snapshot.id } as Session) : null;
+}
+
+/** Loads the private meeting link only for the owner-facing edit form. */
+export async function getEditableSession(sessionId: string): Promise<EditableSession | null> {
+  const [sessionSnapshot, secretSnapshot] = await Promise.all([
+    getDoc(doc(db, 'sessions', sessionId)),
+    getDoc(doc(db, 'sessionSecrets', sessionId)),
+  ]);
+  if (!sessionSnapshot.exists()) return null;
+  const session = { ...sessionSnapshot.data(), id: sessionSnapshot.id } as Session;
+  return {
+    ...session,
+    meetingLink:
+      session.mode === 'online'
+        ? String(secretSnapshot.data()?.meetingLink ?? session.meetingLink ?? '')
+        : '',
+  };
+}
+
+async function sessionHasBookingRecord(sessionId: string): Promise<boolean> {
+  const snapshot = await getDocs(
+    query(collection(db, 'bookings'), where('sessionId', '==', sessionId), limit(1))
+  );
+  return !snapshot.empty;
+}
+
+function assertSessionCanChange(session: Session, teacherId: string, hasBooking: boolean): void {
+  if (session.teacherId !== teacherId) {
+    throw new Error('Only the teacher who created this session can change it.');
+  }
+  if (hasBooking || (session.bookingCount ?? 0) > 0 || session.seatsTaken > 0) {
+    throw new Error('This session cannot be edited or deleted after a learner has booked it.');
+  }
+  if (session.status !== 'open') {
+    throw new Error('Only open sessions can be edited or deleted.');
+  }
 }
 
 export type UpcomingSessionFilters = {
@@ -208,6 +248,7 @@ export async function createSession(teacher: User, input: CreateSessionInput): P
     endAt,
     capacity,
     seatsTaken: 0,
+    bookingCount: 0,
     status: 'open' satisfies SessionStatus,
     coverImageUrl: '',
     createdAt: serverTimestamp(),
@@ -227,6 +268,106 @@ export async function createSession(teacher: User, input: CreateSessionInput): P
   await batch.commit();
 
   return ref.id;
+}
+
+export async function updateSession(
+  teacher: User,
+  sessionId: string,
+  input: CreateSessionInput
+): Promise<void> {
+  if (teacher.role === 'learner') throw new Error('Only teachers can edit sessions.');
+  const skill = skillByTag(input.skillTag);
+  if (!skill) throw new Error('Pick a skill from the SkillBridge list.');
+  if (!teacher.skillTagsOffered.includes(input.skillTag)) {
+    throw new Error('You can only offer sessions for skills on your profile.');
+  }
+
+  const title = input.title.trim();
+  const description = input.description.trim();
+  if (title.length < 3 || title.length > 120) {
+    throw new Error('Title must be between 3 and 120 characters.');
+  }
+  if (description.length < 10 || description.length > 1000) {
+    throw new Error('Description must be between 10 and 1000 characters.');
+  }
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(input.time)) {
+    throw new Error('Use a valid 24-hour time such as 18:00.');
+  }
+  const startDate = parseLocalStart(input.date, input.time);
+  if (Number.isNaN(startDate.getTime())) throw new Error('Pick a valid date and time.');
+  if (startDate.getTime() <= Date.now()) throw new Error('Sessions must start in the future.');
+  if (input.durationMins < 15 || input.durationMins > 240) {
+    throw new Error('Duration must be between 15 and 240 minutes.');
+  }
+  const capacity = input.type === 'one_to_one' ? 1 : Math.max(2, Math.floor(input.capacity));
+  if (input.type === 'group' && capacity < 2) {
+    throw new Error('Group sessions need at least 2 seats.');
+  }
+  if (capacity > 50) throw new Error('A session can have at most 50 seats.');
+  if (input.mode === 'online' && !input.meetingLink.trim()) {
+    throw new Error('Online sessions need a meeting link.');
+  }
+  if (input.mode === 'online' && !/^https:\/\//i.test(input.meetingLink.trim())) {
+    throw new Error('Meeting links must start with https://.');
+  }
+  if (input.mode === 'in_person' && !input.locationText.trim()) {
+    throw new Error('In-person sessions need a location.');
+  }
+
+  const hasBooking = await sessionHasBookingRecord(sessionId);
+  const startAt = Timestamp.fromDate(startDate);
+  const endAt = Timestamp.fromDate(new Date(startDate.getTime() + input.durationMins * 60_000));
+
+  await runTransaction(db, async (tx) => {
+    const sessionRef = doc(db, 'sessions', sessionId);
+    const sessionSnapshot = await tx.get(sessionRef);
+    if (!sessionSnapshot.exists()) throw new Error('This session no longer exists.');
+    const session = { ...sessionSnapshot.data(), id: sessionSnapshot.id } as Session;
+    assertSessionCanChange(session, teacher.uid, hasBooking);
+
+    tx.update(sessionRef, {
+      title,
+      description,
+      descriptionSource: 'manual',
+      skillTag: input.skillTag,
+      category: skill.category as Category,
+      level: input.level,
+      type: input.type,
+      mode: input.mode,
+      meetingLink: '',
+      locationText: input.mode === 'in_person' ? input.locationText.trim() : '',
+      startAt,
+      durationMins: input.durationMins,
+      endAt,
+      capacity,
+      updatedAt: serverTimestamp(),
+    });
+
+    const secretRef = doc(db, 'sessionSecrets', sessionId);
+    if (input.mode === 'online') {
+      tx.set(secretRef, {
+        sessionId,
+        teacherId: teacher.uid,
+        meetingLink: input.meetingLink.trim(),
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    } else {
+      tx.delete(secretRef);
+    }
+  });
+}
+
+export async function deleteSession(sessionId: string, teacherId: string): Promise<void> {
+  const hasBooking = await sessionHasBookingRecord(sessionId);
+  await runTransaction(db, async (tx) => {
+    const sessionRef = doc(db, 'sessions', sessionId);
+    const snapshot = await tx.get(sessionRef);
+    if (!snapshot.exists()) throw new Error('This session no longer exists.');
+    const session = { ...snapshot.data(), id: snapshot.id } as Session;
+    assertSessionCanChange(session, teacherId, hasBooking);
+    tx.delete(sessionRef);
+    tx.delete(doc(db, 'sessionSecrets', sessionId));
+  });
 }
 
 export async function cancelSession(sessionId: string, teacherId: string): Promise<void> {

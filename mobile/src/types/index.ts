@@ -272,6 +272,8 @@ export type Session = {
   endAt: Timestamp;
   capacity: number;
   seatsTaken: number;
+  /** Monotonic count used to lock editing once the first booking is requested. */
+  bookingCount?: number;
   status: SessionStatus;
   coverImageUrl: string;
   createdAt: Timestamp | null;

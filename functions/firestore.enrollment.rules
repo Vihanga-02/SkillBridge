@@ -4,6 +4,19 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
+    // Mirrors shared/enrollmentPolicy.js; parity is covered by emulator tests.
+    function activeEnrollment(data) {
+      return data.get('active', true) != false &&
+        !(data.get('status', 'active') in ['cancelled', 'canceled', 'inactive', 'removed', 'unenrolled']);
+    }
+    function activeLearner(lessonId) {
+      let progressPath = /databases/$(database)/documents/lessonProgress/$(request.auth.uid + '_' + lessonId);
+      let enrollmentId = existsAfter(progressPath)
+        ? getAfter(progressPath).data.get('enrollmentId', request.auth.uid + '_' + lessonId)
+        : request.auth.uid + '_' + lessonId;
+      let data = get(/databases/$(database)/documents/enrollments/$(enrollmentId)).data;
+      return data.userId == request.auth.uid && data.lessonId == lessonId && activeEnrollment(data);
+    }
     function teacher() {
       return signedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['teacher', 'both'];
     }
@@ -27,7 +40,7 @@ service cloud.firestore {
       allow update: if signedIn() && resource.data.published == true
         && resource.data.get('deleting', false) == false
         && (resource.data.teacherId == request.auth.uid ||
-          exists(/databases/$(database)/documents/enrollments/$(request.auth.uid + '_' + lessonId)))
+          activeLearner(lessonId))
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['completeCount', 'updatedAt'])
         && request.resource.data.completeCount is int
         && request.resource.data.completeCount >= 0
@@ -42,6 +55,7 @@ service cloud.firestore {
       allow list: if signedIn() && resource.data.userId == request.auth.uid;
       allow create, delete: if false; // Trusted enrollment transaction only.
       allow update: if signedIn() && resource.data.userId == request.auth.uid
+        && activeEnrollment(resource.data)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'contentCount', 'completedContentIds', 'progress', 'completed', 'completedAt', 'updatedAt'
         ]);

@@ -91,7 +91,7 @@ test('legacy IDs prevent duplicates and missing counts are reconciled on enrollm
 });
 test('actual records block deletion even with a stale zero counter', async () => {
   const s = setup();
-  s.data.set('enrollments/legacy', { lessonId: 'l', active: false });
+  s.data.set('enrollments/legacy', { lessonId: 'l', status: 'active' });
   await assert.rejects(s.deleteLesson(request('t')), /currently enrolled/);
   assert.equal(s.data.get('lessons/l').published, true);
   assert.deepEqual(s.removedFiles, []);
@@ -252,4 +252,58 @@ test('object 404 does not hide a missing bucket or bucket permission failure', a
     await s.deleteLesson(request('t'));
     assert.equal(s.data.has('lessons/l'), false);
   }
+});
+
+const { isActiveEnrollment } = require('../shared/enrollmentPolicy');
+test('shared policy preserves legacy/completed records and excludes all historical statuses', () => {
+  for (const record of [{}, { status: 'active' }, { completed: true }, { status: 'completed' }]) assert.equal(isActiveEnrollment(record), true);
+  for (const status of ['cancelled', 'canceled', 'inactive', 'removed', 'unenrolled']) assert.equal(isActiveEnrollment({ status }), false);
+  assert.equal(isActiveEnrollment({ active: false, status: 'active' }), false);
+});
+test('historical records neither count nor block deletion and are removed with progress', async () => {
+  const s = setup();
+  for (const [i, status] of ['cancelled', 'inactive', 'removed'].entries()) s.data.set('enrollments/' + i, { userId: 'a', lessonId: 'l', status });
+  s.data.set('lessonProgress/a_l', { lessonId: 'l' });
+  await s.migrateLesson(s.db.doc('lessons/l'));
+  assert.equal(s.data.get('lessons/l').enrollmentCount, 0);
+  await s.deleteLesson(request('t'));
+  assert.equal([...s.data.keys()].some((p) => p.startsWith('enrollments/') || p.startsWith('lessonProgress/') || p === 'lessons/l'), false);
+});
+test('one active learner prevents deleting any historical records', async () => {
+  const s = setup();
+  s.data.set('enrollments/active', { userId: 'a', lessonId: 'l', status: 'active' });
+  s.data.set('enrollments/history', { userId: 'b', lessonId: 'l', active: false });
+  await assert.rejects(s.deleteLesson(request('t')), /currently enrolled/);
+  assert.equal(s.data.has('enrollments/history'), true);
+  assert.equal(s.data.has('enrollments/active'), true);
+});
+test('reactivation reuses history and counts once; cancellation decrements once', async () => {
+  for (const id of ['a_l', 'legacy-id']) {
+    const s = setup();
+    s.data.set('enrollments/' + id, { id, userId: 'a', lessonId: 'l', status: 'cancelled', active: false, progress: 50 });
+    await Promise.all([s.enrollLesson(request('a')), s.enrollLesson(request('a'))]);
+    assert.equal(s.data.get('lessons/l').enrollmentCount, 1);
+    assert.equal(s.data.get('enrollments/' + id).progress, 50);
+    assert.equal(s.data.get('enrollments/' + id).active, true);
+    assert.equal([...s.data.keys()].filter((p) => p.startsWith('enrollments/')).length, 1);
+    await s.cancelEnrollment(request('a'));
+    await s.cancelEnrollment(request('a'));
+    assert.equal(s.data.get('lessons/l').enrollmentCount, 0);
+    await s.deleteLesson(request('t'));
+    assert.equal(s.data.has('enrollments/' + id), false);
+  }
+});
+test('partial history cleanup resumes without decrementing the count again', async () => {
+  let pages = 0;
+  const hooks = { beforeCommit: (writes) => {
+    if (writes.some(([path, value]) => path.startsWith('enrollments/') && value === null) && ++pages === 2) throw new Error('history cleanup failed');
+  } };
+  const s = setup({}, hooks);
+  for (let i = 0; i < 501; i++) s.data.set('enrollments/' + i, { lessonId: 'l', status: 'inactive' });
+  await assert.rejects(s.deleteLesson(request('t')), /history cleanup failed/);
+  assert.equal([...s.data.keys()].filter((p) => p.startsWith('enrollments/')).length, 1);
+  assert.equal(s.data.get('lessons/l').enrollmentCount, 0);
+  delete hooks.beforeCommit;
+  await s.deleteLesson(request('t'));
+  assert.equal([...s.data.keys()].some((p) => p.startsWith('enrollments/')), false);
 });

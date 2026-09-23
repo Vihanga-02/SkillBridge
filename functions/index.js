@@ -8,6 +8,7 @@ initializeApp();
 const db = getFirestore();
 const operations = createOperations(db, FieldValue, HttpsError, () => getStorage().bucket());
 exports.enrollLesson = onCall(operations.enrollLesson);
+exports.cancelEnrollment = onCall(operations.cancelEnrollment);
 exports.deleteLesson = onCall(operations.deleteLesson);
 
 // Teacher edits must not require reading private learner documents on a client.

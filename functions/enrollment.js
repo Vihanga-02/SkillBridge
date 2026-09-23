@@ -1,5 +1,6 @@
 // All enrollment creation and lesson deletion must go through these operations.
 // Both write the lesson document, serializing enrollment, migration and deletion.
+const { isActiveEnrollment } = require('./shared/enrollmentPolicy');
 function createOperations(db, FieldValue, HttpsError, bucket) {
   const fail = (code, message) => { throw new HttpsError(code, message); };
   function identity(request) {
@@ -29,34 +30,54 @@ function createOperations(db, FieldValue, HttpsError, bucket) {
         if (existing.data().userId !== uid || existing.data().lessonId !== lessonId) {
           fail('failed-precondition', 'Enrollment identifier conflict.');
         }
-        return { enrolled: true };
       }
       // Also protect legacy records whose IDs were not deterministic. This query
       // is privileged and never returns learner records to the caller.
       const records = await tx.get(enrollmentQuery(lessonId));
-      if (records.docs.some((row) => row.data().userId === uid)) return { enrolled: true };
+      const ownRecords = records.docs.filter((row) => row.data().userId === uid);
+      if (ownRecords.some((row) => isActiveEnrollment(row.data()))) return { enrolled: true };
+      const previous = existing.exists ? existing : ownRecords[0];
+      const targetRef = previous?.ref ?? enrollmentRef;
       const timestamp = FieldValue.serverTimestamp();
       const title = lesson.lessonName ?? lesson.title ?? '';
-      tx.create(enrollmentRef, {
-        id: enrollmentRef.id, userId: uid, lessonId,
+      tx.set(targetRef, {
+        id: targetRef.id, userId: uid, lessonId, active: true, status: 'active',
         lessonName: title, teacherId: lesson.teacherId ?? lesson.ownerId,
         teacherName: lesson.teacherName ?? lesson.ownerName ?? '',
         careerGoalId: lesson.careerGoalId ?? '', careerGoalName: lesson.careerGoalName ?? '',
-        contentCount: (lesson.contents ?? []).length, completedContentIds: [],
-        progress: 0, completed: false, completedAt: null,
-        enrolledAt: timestamp, updatedAt: timestamp,
-      });
-      tx.set(db.doc(`lessonProgress/${uid}_${lessonId}`), {
+        contentCount: (lesson.contents ?? []).length,
+        completedContentIds: previous?.data().completedContentIds ?? [],
+        progress: previous?.data().progress ?? 0, completed: previous?.data().completed ?? false,
+        completedAt: previous?.data().completedAt ?? null,
+        enrolledAt: previous?.data().enrolledAt ?? timestamp, updatedAt: timestamp,
+      }, { merge: true });
+      if (!previous) tx.set(db.doc(`lessonProgress/${uid}_${lessonId}`), {
         id: `${uid}_${lessonId}`, userId: uid, lessonId, lessonTitle: title,
         skillTag: lesson.skillTag ?? '', status: 'in_progress', lastCardIndex: 0,
         quizScore: 0, quizAttempts: 0, minutesSpent: 0,
         startedAt: timestamp, completedAt: null, updatedAt: timestamp,
       }, { merge: true });
       tx.update(lessonRef, {
-        enrollmentCount: Number.isSafeInteger(lesson.enrollmentCount) && lesson.enrollmentCount >= 0
-          ? FieldValue.increment(1) : countLearners(records) + 1,
+        // The query and write share this transaction; no read/modify/write race.
+        enrollmentCount: countLearners(records) + 1,
       });
       return { enrolled: true };
+    });
+  }
+
+  // Trusted membership transition, with no new cancellation UI. Update all
+  // legacy duplicates together so one learner is decremented at most once.
+  async function cancelEnrollment(request) {
+    const { uid, lessonId } = identity(request);
+    const lessonRef = db.doc(`lessons/${lessonId}`);
+    return db.runTransaction(async (tx) => {
+      const lesson = await tx.get(lessonRef);
+      if (!lesson.exists || lesson.data().deleting) fail('failed-precondition', 'Lesson is unavailable.');
+      const records = await tx.get(enrollmentQuery(lessonId));
+      const own = records.docs.filter((row) => row.data().userId === uid);
+      own.forEach((row) => tx.update(row.ref, { active: false, status: 'cancelled', updatedAt: FieldValue.serverTimestamp() }));
+      tx.update(lessonRef, { enrollmentCount: countLearners({ docs: records.docs.filter((row) => row.data().userId !== uid) }) });
+      return { enrolled: false };
     });
   }
 
@@ -75,9 +96,8 @@ function createOperations(db, FieldValue, HttpsError, bucket) {
       if ((data.teacherId ?? data.ownerId) !== uid) {
         fail('permission-denied', 'Only the teacher who created this lesson can delete it.');
       }
-      // Any record blocks deletion, including inactive or malformed legacy ones.
-      const records = await tx.get(enrollmentQuery(lessonId).limit(1));
-      if (!records.empty) fail('failed-precondition', 'This lesson cannot be deleted because learners are currently enrolled.');
+      const records = await tx.get(enrollmentQuery(lessonId));
+      if (records.docs.some((row) => isActiveEnrollment(row.data()))) fail('failed-precondition', 'This lesson cannot be deleted because learners are currently enrolled.');
       return data;
     }
     const lesson = await db.runTransaction(async (tx) => {
@@ -89,6 +109,18 @@ function createOperations(db, FieldValue, HttpsError, bucket) {
       return data;
     });
     if (!lesson) return { deleted: true };
+    // Delete only history, rechecking each page in a transaction so a record
+    // cannot become active between validation and its deletion.
+    while (true) {
+      const removed = await db.runTransaction(async (tx) => {
+        const current = await verifyDeletion(tx);
+        if (!current) return 0;
+        const history = await tx.get(enrollmentQuery(lessonId).limit(500));
+        history.docs.forEach((row) => tx.delete(row.ref));
+        return history.docs.length;
+      });
+      if (!removed) break;
+    }
     // Never clear the marker after partial cleanup: another attempt may still
     // be running, and republishing would expose incomplete lesson content.
     // Requery remaining records in bounded batches. Missing records are safe.
@@ -122,6 +154,8 @@ function createOperations(db, FieldValue, HttpsError, bucket) {
       const current = await verifyDeletion(tx);
       if (!current) return; // Another owner attempt already finished.
       if (current.deleting !== true) fail('failed-precondition', 'Lesson deletion state changed. Retry deletion.');
+      const remaining = await tx.get(enrollmentQuery(lessonId).limit(1));
+      if (!remaining.empty) fail('failed-precondition', 'Enrollment history changed. Retry deletion.');
       tx.delete(lessonRef);
     });
     return { deleted: true };
@@ -135,12 +169,12 @@ function createOperations(db, FieldValue, HttpsError, bucket) {
       tx.update(lessonRef, { enrollmentCount: countLearners(records) });
     });
   }
-  return { enrollLesson, deleteLesson, migrateLesson };
+  return { enrollLesson, cancelEnrollment, deleteLesson, migrateLesson };
 }
 
 function countLearners(snapshot) {
   // Count each learner once; preserve malformed legacy records conservatively.
-  return new Set(snapshot.docs.map((row) => row.data().userId || `missing:${row.id}`)).size;
+  return new Set(snapshot.docs.filter((row) => isActiveEnrollment(row.data())).map((row) => row.data().userId || `missing:${row.id}`)).size;
 }
 
 module.exports = { createOperations };

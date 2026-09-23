@@ -112,3 +112,44 @@ test('overlapping owner requests can both complete against real Firestore', asyn
   assert.equal((await db.doc('lessons/l').get()).exists, false);
   assert.equal((await db.doc('lessonProgress/legacy').get()).exists, false);
 });
+
+test('active policy agrees with progress rules and migration for every legacy status', async () => {
+  const client = env.authenticatedContext('a').firestore();
+  for (const state of [{}, { status: 'active' }, { completed: true },
+    { status: 'cancelled' }, { status: 'canceled' }, { status: 'inactive' },
+    { status: 'removed' }, { status: 'unenrolled' }, { active: false }]) {
+    await db.doc('enrollments/a_l').set({ userId: 'a', lessonId: 'l', ...state });
+    const active = require('../shared/enrollmentPolicy').isActiveEnrollment(state);
+    const update = updateDoc(doc(client, 'enrollments/a_l'), { progress: 25 });
+    if (active) await assertSucceeds(update); else await assertFails(update);
+    await ops.migrateLesson(db.doc('lessons/l'));
+    assert.equal((await db.doc('lessons/l').get()).data().enrollmentCount, Number(active));
+  }
+});
+
+test('reactivation, cancellation and history cleanup preserve one active membership', async () => {
+  await db.doc('enrollments/a_l').set({ userId: 'a', lessonId: 'l', status: 'cancelled', progress: 40 });
+  await db.doc('enrollments/old').set({ userId: 'b', lessonId: 'l', active: false });
+  await Promise.all([ops.enrollLesson(request('a')), ops.enrollLesson(request('a'))]);
+  assert.equal((await db.doc('lessons/l').get()).data().enrollmentCount, 1);
+  assert.equal((await db.doc('enrollments/a_l').get()).data().progress, 40);
+  await assert.rejects(ops.deleteLesson(request('t')), /currently enrolled/);
+  assert.equal((await db.doc('enrollments/old').get()).exists, true);
+  await ops.cancelEnrollment(request('a'));
+  await ops.cancelEnrollment(request('a'));
+  assert.equal((await db.doc('lessons/l').get()).data().enrollmentCount, 0);
+  await ops.deleteLesson(request('t'));
+  assert.equal((await db.collection('enrollments').where('lessonId', '==', 'l').get()).empty, true);
+  assert.equal((await db.doc('lessons/l').get()).exists, false);
+});
+
+test('completion rules support a private legacy enrollment reference and reject cancellation', async () => {
+  const client = env.authenticatedContext('a').firestore();
+  await db.doc('enrollments/legacy').set({ userId: 'a', lessonId: 'l', status: 'active' });
+  await db.doc('lessonProgress/a_l').set({ userId: 'a', lessonId: 'l', enrollmentId: 'legacy' });
+  await assertSucceeds(updateDoc(doc(client, 'lessons/l'), { completeCount: 1 }));
+  await db.doc('enrollments/legacy').update({ status: 'cancelled' });
+  await assertFails(updateDoc(doc(client, 'lessons/l'), { completeCount: 2 }));
+  await db.doc('enrollments/legacy').update({ status: 'active', userId: 'b' });
+  await assertFails(updateDoc(doc(client, 'lessons/l'), { completeCount: 2 }));
+});

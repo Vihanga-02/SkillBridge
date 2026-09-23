@@ -1,3 +1,4 @@
+import { isActiveEnrollment } from '../../../functions/shared/enrollmentPolicy';
 import { httpsCallable } from 'firebase/functions';
 import {
   collection,
@@ -491,23 +492,36 @@ export function subscribeToLesson(
     onValue(snapshot.exists() ? normalizeLesson({ ...snapshot.data(), id: snapshot.id }) : null), onError);
 }
 
+async function ownEnrollmentRecords(userId: string): Promise<LessonEnrollment[]> {
+  // Sort locally: orderBy would silently exclude legacy rows lacking updatedAt.
+  const rows = await getDocs(query(enrollmentsCol, where('userId', '==', userId)));
+  return rows.docs.map(toEnrollment)
+    .filter(isActiveEnrollment)
+    .sort((a, b) => (b.updatedAt?.toMillis?.() ?? 0) - (a.updatedAt?.toMillis?.() ?? 0));
+}
+
 export async function getEnrollment(userId: string, lessonId: string): Promise<LessonEnrollment | null> {
-  const snapshot = await getDoc(doc(db, 'enrollments', enrollmentIdFor(userId, lessonId)));
-  return snapshot.exists() ? normalizeEnrollment(snapshot.data(), snapshot.id) : null;
+  const rows = await ownEnrollmentRecords(userId);
+  return rows.find((row) => row.lessonId === lessonId) ?? null;
 }
 
 export async function listEnrollmentsByUser(userId: string): Promise<LessonEnrollment[]> {
-  try {
-    const snapshot = await getDocs(
-      query(enrollmentsCol, where('userId', '==', userId), orderBy('updatedAt', 'desc'))
-    );
-    return snapshot.docs.map(toEnrollment);
-  } catch {
-    const snapshot = await getDocs(query(enrollmentsCol, where('userId', '==', userId)));
-    return snapshot.docs
-      .map(toEnrollment)
-      .sort((a, b) => (b.updatedAt?.toMillis?.() ?? 0) - (a.updatedAt?.toMillis?.() ?? 0));
-  }
+  const rows = await ownEnrollmentRecords(userId);
+  const unique = [...new Map(rows.slice().reverse().map((row) => [row.lessonId, row])).values()];
+  const available = await Promise.all(unique.map(async (row) => {
+    if (!row.lessonId || row.lessonId.includes('/')) return null;
+    try {
+      const lesson = await getLesson(row.lessonId);
+      return lesson && lesson.published && !lesson.deleting ? row : null;
+    } catch (error) {
+      // Missing/private lessons can be denied by rules rather than returned as
+      // absent. Hide unavailable cards, but surface network/service failures.
+      if ((error as { code?: string }).code === 'permission-denied') return null;
+      throw error;
+    }
+  }));
+  return available.filter((row): row is LessonEnrollment => row !== null)
+    .sort((a, b) => (b.updatedAt?.toMillis?.() ?? 0) - (a.updatedAt?.toMillis?.() ?? 0));
 }
 
 export async function listEnrollmentIds(userId: string): Promise<Set<string>> {
@@ -532,7 +546,8 @@ export async function toggleLessonContentDone(
   lesson: Lesson,
   contentId: string
 ): Promise<LessonEnrollment> {
-  const enrollmentRef = doc(db, 'enrollments', enrollmentIdFor(user.uid, lesson.id));
+  const currentEnrollment = await getEnrollment(user.uid, lesson.id);
+  const enrollmentRef = doc(db, 'enrollments', currentEnrollment?.id ?? enrollmentIdFor(user.uid, lesson.id));
   const progressRef = doc(db, 'lessonProgress', `${user.uid}_${lesson.id}`);
   const lessonRef = doc(db, 'lessons', lesson.id);
   const userRef = doc(db, 'users', user.uid);
@@ -541,7 +556,7 @@ export async function toggleLessonContentDone(
       transaction.get(enrollmentRef),
       transaction.get(lessonRef),
     ]);
-    if (!enrollmentSnapshot.exists()) {
+    if (!enrollmentSnapshot.exists() || !isActiveEnrollment(enrollmentSnapshot.data())) {
       throw new Error('Enroll in this lesson before updating progress.');
     }
     if (!lessonSnapshot.exists() || lessonSnapshot.data().published !== true || lessonSnapshot.data().deleting === true) {
@@ -576,6 +591,7 @@ export async function toggleLessonContentDone(
     });
     transaction.set(progressRef, {
       id: progressRef.id,
+      enrollmentId: enrollmentRef.id,
       userId: user.uid,
       lessonId: lesson.id,
       lessonTitle: currentLesson.lessonName,
@@ -613,7 +629,8 @@ export async function toggleLessonContentDone(
 
 export async function markLessonCompleted(user: User, lesson: Lesson): Promise<void> {
   const progressRef = doc(db, 'lessonProgress', `${user.uid}_${lesson.id}`);
-  const enrollmentRef = doc(db, 'enrollments', enrollmentIdFor(user.uid, lesson.id));
+  const currentEnrollment = await getEnrollment(user.uid, lesson.id);
+  const enrollmentRef = doc(db, 'enrollments', currentEnrollment?.id ?? enrollmentIdFor(user.uid, lesson.id));
   const lessonRef = doc(db, 'lessons', lesson.id);
   const userRef = doc(db, 'users', user.uid);
 
@@ -626,13 +643,15 @@ export async function markLessonCompleted(user: User, lesson: Lesson): Promise<v
       throw new Error('This lesson is no longer available.');
     }
     const currentLesson = normalizeLesson({ ...lessonSnapshot.data(), id: lessonSnapshot.id });
-    if (!enrollmentSnapshot.exists() && currentLesson.teacherId !== user.uid) {
+    const activeEnrollment = enrollmentSnapshot.exists() && isActiveEnrollment(enrollmentSnapshot.data());
+    if (!activeEnrollment && currentLesson.teacherId !== user.uid) {
       throw new Error('Enroll in this lesson before updating progress.');
     }
-    const wasCompleted = enrollmentSnapshot.exists() && enrollmentSnapshot.data().completed === true;
+    const wasCompleted = activeEnrollment && enrollmentSnapshot.data()?.completed === true;
 
     transaction.set(progressRef, {
       id: progressRef.id,
+      enrollmentId: enrollmentRef.id,
       userId: user.uid,
       lessonId: currentLesson.id,
       lessonTitle: currentLesson.lessonName,
@@ -645,7 +664,7 @@ export async function markLessonCompleted(user: User, lesson: Lesson): Promise<v
       completedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     }, { merge: true });
-    if (enrollmentSnapshot.exists()) {
+    if (activeEnrollment) {
       transaction.update(enrollmentRef, {
         contentCount: currentLesson.contents.length,
         completedContentIds: currentLesson.contents.map((item) => item.id),
@@ -660,7 +679,7 @@ export async function markLessonCompleted(user: User, lesson: Lesson): Promise<v
         completeCount: increment(1),
         updatedAt: serverTimestamp(),
       });
-      if (enrollmentSnapshot.exists()) {
+      if (activeEnrollment) {
         transaction.update(userRef, { 'stats.lessonsCompleted': increment(1) });
       }
     }

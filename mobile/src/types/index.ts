@@ -214,6 +214,7 @@ export type Lesson = {
 
 /** `lessonProgress/{uid}_{lessonId}` — owner: Member 2. Composite id keeps it idempotent. */
 export type LessonProgress = {
+  enrollmentId?: string;
   id: string;
   userId: string;
   lessonId: string;
@@ -231,6 +232,8 @@ export type LessonProgress = {
 
 /** `enrollments/{uid}_{lessonId}` - one learner enrollment per lesson. */
 export type LessonEnrollment = {
+  active?: boolean;
+  status?: string;
   id: string;
   userId: string;
   lessonId: string;

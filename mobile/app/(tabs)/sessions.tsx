@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BookingCard } from '@/components/session/BookingCard';
@@ -21,13 +21,13 @@ import {
   requestBooking,
   subscribeToMyBookings,
 } from '@/services/bookingService';
-import { getSessionsByTeacher, listUpcomingSessions } from '@/services/sessionService';
+import { deleteSession, getSessionsByTeacher, listUpcomingSessions } from '@/services/sessionService';
 import type { Booking, Session } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
 
 type SessionsView = 'browse' | 'bookings' | 'teaching';
 type BookingFilter = 'upcoming' | 'past' | 'cancelled';
-type TeachingView = 'requests' | 'upcoming';
+type TeachingView = 'requests' | 'sessions' | 'schedule' | 'history';
 
 export default function SessionsScreen() {
   const { profile } = useAuth();
@@ -106,6 +106,9 @@ export default function SessionsScreen() {
   );
   const pendingRequests = teachingBookings.filter((booking) => booking.status === 'pending');
   const scheduledTeaching = teachingBookings.filter((booking) => booking.status === 'confirmed');
+  const teachingHistory = teachingBookings.filter((booking) =>
+    ['completed', 'declined', 'cancelled'].includes(booking.status)
+  );
   const upcomingOffers = myOffers.filter(
     (session) =>
       ['open', 'full'].includes(session.status) &&
@@ -150,6 +153,33 @@ export default function SessionsScreen() {
     } finally {
       setActingId(null);
     }
+  }
+
+  function confirmDeleteSession(session: Session) {
+    if (!profile) return;
+    Alert.alert(
+      'Delete session?',
+      `Delete "${session.title}" permanently? This cannot be undone.`,
+      [
+        { text: 'Keep session', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setActingId(session.id);
+            setSessionsError(null);
+            try {
+              await deleteSession(session.id, profile.uid);
+              await loadSessions();
+            } catch (actionError) {
+              Alert.alert('Could not delete session', errorMessage(actionError));
+            } finally {
+              setActingId(null);
+            }
+          },
+        },
+      ]
+    );
   }
 
   function confirmQuickBooking(session: Session) {
@@ -295,15 +325,30 @@ export default function SessionsScreen() {
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           {sessionsError ? <Notice tone="error" message={sessionsError} /> : null}
           <View style={styles.teachingTabs}>
-            <SegmentButton
-              label={`Requests${pendingRequests.length > 0 ? ` (${pendingRequests.length})` : ''}`}
+            <TeachingTab
+              label="Requests"
+              icon="file-tray-full-outline"
+              badge={pendingRequests.length}
               selected={teachingViewTab === 'requests'}
               onPress={() => setTeachingViewTab('requests')}
             />
-            <SegmentButton
-              label="Upcoming"
-              selected={teachingViewTab === 'upcoming'}
-              onPress={() => setTeachingViewTab('upcoming')}
+            <TeachingTab
+              label="My Sessions"
+              icon="calendar-outline"
+              selected={teachingViewTab === 'sessions'}
+              onPress={() => setTeachingViewTab('sessions')}
+            />
+            <TeachingTab
+              label="Schedule"
+              icon="calendar-clear-outline"
+              selected={teachingViewTab === 'schedule'}
+              onPress={() => setTeachingViewTab('schedule')}
+            />
+            <TeachingTab
+              label="History"
+              icon="time-outline"
+              selected={teachingViewTab === 'history'}
+              onPress={() => setTeachingViewTab('history')}
             />
           </View>
 
@@ -326,44 +371,23 @@ export default function SessionsScreen() {
               ) : (
                 <View style={styles.list}>
                   {pendingRequests.map((booking) => (
-                    <View key={booking.id} style={styles.requestBlock}>
-                      <BookingCard
-                        booking={booking}
-                        counterpart={booking.learnerName}
-                        counterpartAvatarUrl={booking.learnerAvatarUrl}
-                        onPress={() => openBooking(booking.id)}
-                      />
-                      <View style={styles.requestActions}>
-                        <Button
-                          label="Accept"
-                          loading={actingId === booking.id}
-                          onPress={() => void onApprove(booking)}
-                          style={styles.actionHalf}
-                        />
-                        <Button
-                          label="Decline"
-                          variant="danger"
-                          loading={actingId === booking.id}
-                          onPress={() => void onDecline(booking)}
-                          style={styles.actionHalf}
-                        />
-                      </View>
-                    </View>
+                    <BookingCard
+                      key={booking.id}
+                      booking={booking}
+                      counterpart={booking.learnerName}
+                      counterpartAvatarUrl={booking.learnerAvatarUrl}
+                      onPress={() => openBooking(booking.id)}
+                      onAccept={() => void onApprove(booking)}
+                      onDecline={() => void onDecline(booking)}
+                      actionLoading={actingId === booking.id}
+                    />
                   ))}
                 </View>
               )}
             </View>
-          ) : (
-            <>
-              {scheduledTeaching.length > 0 ? (
-                <BookingList
-                  title="Confirmed Learners"
-                  bookings={scheduledTeaching}
-                  counterpartRole="learner"
-                />
-              ) : null}
+          ) : teachingViewTab === 'sessions' ? (
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Upcoming Sessions</Text>
+                <Text style={styles.sectionTitle}>My Published Sessions</Text>
                 {upcomingOffers.length === 0 ? (
                   <EmptyState
                     icon="calendar-outline"
@@ -374,19 +398,67 @@ export default function SessionsScreen() {
                   />
                 ) : (
                   <View style={styles.list}>
-                    {upcomingOffers.map((session) => (
-                      <SessionCard
-                        key={session.id}
-                        session={session}
-                        onPress={() =>
-                          router.push({ pathname: '/session/[id]', params: { id: session.id } })
-                        }
-                      />
-                    ))}
+                    {upcomingOffers.map((session) => {
+                      const hasBooking =
+                        (session.bookingCount ?? 0) > 0 ||
+                        session.seatsTaken > 0 ||
+                        teachingBookings.some((booking) => booking.sessionId === session.id);
+                      return (
+                        <View key={session.id} style={styles.offerBlock}>
+                          <SessionCard
+                            session={session}
+                            onPress={() =>
+                              router.push({ pathname: '/session/[id]', params: { id: session.id } })
+                            }
+                          />
+                          {hasBooking ? (
+                            <Notice
+                              tone="info"
+                              message="Editing and deletion are locked because a learner has booked this session."
+                            />
+                          ) : (
+                            <View style={styles.offerActions}>
+                              <Button
+                                label="Edit"
+                                variant="secondary"
+                                icon="create-outline"
+                                disabled={actingId === session.id}
+                                onPress={() =>
+                                  router.push({
+                                    pathname: '/session/create',
+                                    params: { id: session.id },
+                                  })
+                                }
+                                style={styles.actionHalf}
+                              />
+                              <Button
+                                label="Delete"
+                                variant="danger"
+                                icon="trash-outline"
+                                loading={actingId === session.id}
+                                onPress={() => confirmDeleteSession(session)}
+                                style={styles.actionHalf}
+                              />
+                            </View>
+                          )}
+                        </View>
+                      );
+                    })}
                   </View>
                 )}
               </View>
-            </>
+          ) : teachingViewTab === 'schedule' ? (
+            <BookingList
+              title="Upcoming Teaching Schedule"
+              bookings={scheduledTeaching}
+              counterpartRole="learner"
+            />
+          ) : (
+            <BookingList
+              title="Teaching History"
+              bookings={teachingHistory}
+              counterpartRole="learner"
+            />
           )}
         </ScrollView>
       ) : null}
@@ -461,6 +533,51 @@ function SegmentButton({ label, selected, onPress }: { label: string; selected: 
   return <Button label={label} variant={selected ? 'secondary' : 'ghost'} onPress={onPress} style={styles.segmentButton} />;
 }
 
+function TeachingTab({
+  label,
+  icon,
+  selected,
+  badge = 0,
+  onPress,
+}: {
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  selected: boolean;
+  badge?: number;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="tab"
+      accessibilityLabel={label}
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.teachingTab,
+        selected && styles.teachingTabSelected,
+        pressed && styles.teachingTabPressed,
+      ]}>
+      <View style={styles.teachingTabIconWrap}>
+        <Ionicons
+          name={icon}
+          size={sizes.iconMd}
+          color={selected ? colors.accent : colors.inkMuted}
+        />
+        {badge > 0 ? (
+          <View style={styles.teachingTabBadge}>
+            <Text style={styles.teachingTabBadgeText}>{badge > 99 ? '99+' : badge}</Text>
+          </View>
+        ) : null}
+      </View>
+      <Text
+        numberOfLines={1}
+        style={[styles.teachingTabLabel, selected && styles.teachingTabLabelSelected]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   segment: {
@@ -495,6 +612,42 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     backgroundColor: colors.accentSurface,
   },
+  teachingTab: {
+    flex: 1,
+    minHeight: 82,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xs,
+    borderRadius: radius.md,
+  },
+  teachingTabSelected: {
+    backgroundColor: colors.surface,
+    shadowColor: colors.ink,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 5,
+    elevation: 3,
+  },
+  teachingTabPressed: { opacity: 0.75 },
+  teachingTabIconWrap: { position: 'relative' },
+  teachingTabLabel: { ...type.caption, color: colors.inkMuted, textAlign: 'center' },
+  teachingTabLabelSelected: { color: colors.accent, fontWeight: '700' },
+  teachingTabBadge: {
+    position: 'absolute',
+    top: -spacing.sm,
+    right: -spacing.md,
+    minWidth: spacing.xl,
+    height: spacing.xl,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xs,
+    borderRadius: radius.full,
+    backgroundColor: colors.danger,
+    borderWidth: 2,
+    borderColor: colors.surface,
+  },
+  teachingTabBadgeText: { ...type.caption, color: colors.inkInverse, fontWeight: '700' },
   filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   section: { gap: spacing.md },
   sectionHeading: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
@@ -510,7 +663,7 @@ const styles = StyleSheet.create({
   },
   countText: { ...type.caption, color: colors.inkInverse, fontWeight: '700' },
   list: { gap: spacing.md },
-  requestBlock: { gap: spacing.sm },
-  requestActions: { flexDirection: 'row', gap: spacing.md },
+  offerBlock: { gap: spacing.sm },
+  offerActions: { flexDirection: 'row', gap: spacing.md },
   actionHalf: { flex: 1 },
 });

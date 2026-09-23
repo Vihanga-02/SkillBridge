@@ -1,16 +1,97 @@
 //Component 4 — session-based reviews.
 
-import { doc, runTransaction, serverTimestamp } from 'firebase/firestore';
+import {
+  collection,
+  doc,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+  runTransaction,
+  serverTimestamp,
+  startAfter,
+  where,
+  type DocumentData,
+  type QueryConstraint,
+  type QueryDocumentSnapshot,
+} from 'firebase/firestore';
 
-import { TEXT_LIMITS } from '@/constants/config';
+import { PAGE_SIZE, TEXT_LIMITS } from '@/constants/config';
 import { db } from '@/firebase/config';
 import type { Booking, Review, User } from '@/types';
 
 export type LearnerReviewer = Pick<User, 'uid' | 'name' | 'avatarUrl'>;
 
+/** Stable values stored in Firestore; labels are only for the review form UI. */
+export const REVIEW_TAGS = [
+  { value: 'punctual', label: 'Punctual' },
+  { value: 'explained-clearly', label: 'Explained clearly' },
+  { value: 'helpful', label: 'Helpful' },
+  { value: 'friendly', label: 'Friendly' },
+] as const;
+
+export type ReviewTag = (typeof REVIEW_TAGS)[number]['value'];
+
+const REVIEW_TAG_VALUES = new Set<string>(REVIEW_TAGS.map((tag) => tag.value));
+const reviewsCol = collection(db, 'reviews');
+
+export type ReviewCursor = QueryDocumentSnapshot<DocumentData> | null;
+
+export type ListReviewsOptions = {
+  pageSize?: number;
+  cursor?: ReviewCursor;
+};
+
+export type ReviewPage = {
+  reviews: Review[];
+  cursor: ReviewCursor;
+};
+
+function validateReviewTags(rawTags: readonly string[]): ReviewTag[] {
+  const tags = [...new Set(rawTags.map((tag) => tag.trim()).filter(Boolean))];
+
+  if (tags.some((tag) => !REVIEW_TAG_VALUES.has(tag))) {
+    throw new Error('Choose feedback tags from the available options.');
+  }
+
+  return tags as ReviewTag[];
+}
+
 /** One learner can review a session once, even if they retry the submission. */
 export const reviewIdFor = (sessionId: string, reviewerId: string): string =>
   `${sessionId}_${reviewerId}`;
+
+const toReview = (snapshot: QueryDocumentSnapshot<DocumentData>): Review =>
+  ({ ...snapshot.data(), id: snapshot.id }) as Review;
+
+/**
+ * Gets a user's reviews newest-first. The next cursor is returned only when
+ * another page exists, so callers can safely offer a "Load older reviews" action.
+ *
+ * Requires the `reviews.toUserId ASC + createdAt DESC` composite index.
+ */
+export async function getReviewsForUser(
+  userId: string,
+  { pageSize = PAGE_SIZE.reviews, cursor = null }: ListReviewsOptions = {}
+): Promise<ReviewPage> {
+  if (!userId) return { reviews: [], cursor: null };
+
+  const safePageSize = Math.max(1, Math.min(pageSize, PAGE_SIZE.reviews));
+  const constraints: QueryConstraint[] = [
+    where('toUserId', '==', userId),
+    orderBy('createdAt', 'desc'),
+  ];
+  if (cursor) constraints.push(startAfter(cursor));
+  constraints.push(limit(safePageSize + 1));
+
+  const snapshot = await getDocs(query(reviewsCol, ...constraints));
+  const visible = snapshot.docs.slice(0, safePageSize);
+
+  return {
+    reviews: visible.map(toReview),
+    cursor: snapshot.docs.length > safePageSize ? visible[visible.length - 1] ?? null : null,
+  };
+}
 
 /**
  * Allows the booked learner to review the session's teacher after completion.
@@ -21,7 +102,8 @@ export async function submitLearnerReview(
   bookingId: string,
   reviewer: LearnerReviewer,
   rating: number,
-  rawComment: string
+  rawComment: string,
+  rawTags: readonly string[] = []
 ): Promise<string> {
   if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
     throw new Error('Choose a rating from 1 to 5 stars.');
@@ -31,6 +113,7 @@ export async function submitLearnerReview(
   if (comment.length > TEXT_LIMITS.reviewComment) {
     throw new Error(`Your review must be ${TEXT_LIMITS.reviewComment} characters or fewer.`);
   }
+  const tags = validateReviewTags(rawTags);
 
   const bookingRef = doc(db, 'bookings', bookingId);
   let reviewId = '';
@@ -88,7 +171,7 @@ export async function submitLearnerReview(
       toUserId: booking.teacherId,
       rating,
       comment,
-      tags: [],
+      tags,
       role: 'learner_to_teacher',
       createdAt: serverTimestamp(),
     };

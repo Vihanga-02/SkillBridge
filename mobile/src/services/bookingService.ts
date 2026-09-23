@@ -27,6 +27,9 @@ import type { Booking, BookingStatus, Session, User } from '@/types';
 
 const bookingsCol = collection(db, 'bookings');
 
+/** Credits awarded to a teacher for each completed booking. */
+export const SESSION_COMPLETION_CREDITS = 5;
+
 /** One learner can hold at most one booking record for a session. */
 export const bookingIdFor = (sessionId: string, learnerId: string): string =>
   `${sessionId}_${learnerId}`;
@@ -289,7 +292,7 @@ export async function cancelBooking(bookingId: string, byUid: string): Promise<v
   });
 }
 
-/** Teacher completes a confirmed booking and updates both participants' stats. */
+/** Teacher completes a confirmed booking, earns credits, and updates both participants' stats. */
 export async function markCompleted(bookingId: string, teacherId: string): Promise<void> {
   await runTransaction(db, async (tx) => {
     const bookingRef = doc(db, 'bookings', bookingId);
@@ -316,6 +319,7 @@ export async function markCompleted(bookingId: string, teacherId: string): Promi
     });
     tx.update(doc(db, 'users', booking.teacherId), {
       'stats.sessionsTaught': increment(1),
+      credits: increment(SESSION_COMPLETION_CREDITS),
       updatedAt: serverTimestamp(),
     });
     tx.update(doc(db, 'users', booking.learnerId), {

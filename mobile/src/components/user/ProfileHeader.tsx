@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
@@ -21,6 +21,8 @@ type Props = {
   onEdit?: () => void;
   onBook?: () => void;
   onMessage?: () => void;
+  /** Opens the public review section when this profile has ratings. */
+  onReviewsPress?: () => void;
   messageLoading?: boolean;
   /** Set while Components 3 and 4 are not built yet. */
   ctaDisabledReason?: string;
@@ -32,6 +34,7 @@ export function ProfileHeader({
   onEdit,
   onBook,
   onMessage,
+  onReviewsPress,
   messageLoading = false,
   ctaDisabledReason,
 }: Props) {
@@ -42,7 +45,16 @@ export function ProfileHeader({
       <Text style={styles.name}>{user.name}</Text>
       <Text style={styles.role}>{ROLE_LABEL[user.role]}</Text>
 
-      <RatingStars rating={user.ratingAvg} count={user.ratingCount} />
+      {onReviewsPress && user.ratingCount > 0 ? (
+        <Pressable
+          onPress={onReviewsPress}
+          accessibilityRole="button"
+          accessibilityLabel={`View ${plural(user.ratingCount, 'review')}`}>
+          <RatingStars rating={user.ratingAvg} count={user.ratingCount} />
+        </Pressable>
+      ) : (
+        <RatingStars rating={user.ratingAvg} count={user.ratingCount} />
+      )}
 
       {user.location ? (
         <View style={styles.inlineRow}>

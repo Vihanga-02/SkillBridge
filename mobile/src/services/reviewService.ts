@@ -1,8 +1,22 @@
 //Component 4 — session-based reviews.
 
-import { doc, runTransaction, serverTimestamp } from 'firebase/firestore';
+import {
+  collection,
+  doc,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+  runTransaction,
+  serverTimestamp,
+  startAfter,
+  where,
+  type DocumentData,
+  type QueryConstraint,
+  type QueryDocumentSnapshot,
+} from 'firebase/firestore';
 
-import { TEXT_LIMITS } from '@/constants/config';
+import { PAGE_SIZE, TEXT_LIMITS } from '@/constants/config';
 import { db } from '@/firebase/config';
 import type { Booking, Review, User } from '@/types';
 
@@ -19,6 +33,19 @@ export const REVIEW_TAGS = [
 export type ReviewTag = (typeof REVIEW_TAGS)[number]['value'];
 
 const REVIEW_TAG_VALUES = new Set<string>(REVIEW_TAGS.map((tag) => tag.value));
+const reviewsCol = collection(db, 'reviews');
+
+export type ReviewCursor = QueryDocumentSnapshot<DocumentData> | null;
+
+export type ListReviewsOptions = {
+  pageSize?: number;
+  cursor?: ReviewCursor;
+};
+
+export type ReviewPage = {
+  reviews: Review[];
+  cursor: ReviewCursor;
+};
 
 function validateReviewTags(rawTags: readonly string[]): ReviewTag[] {
   const tags = [...new Set(rawTags.map((tag) => tag.trim()).filter(Boolean))];
@@ -33,6 +60,38 @@ function validateReviewTags(rawTags: readonly string[]): ReviewTag[] {
 /** One learner can review a session once, even if they retry the submission. */
 export const reviewIdFor = (sessionId: string, reviewerId: string): string =>
   `${sessionId}_${reviewerId}`;
+
+const toReview = (snapshot: QueryDocumentSnapshot<DocumentData>): Review =>
+  ({ ...snapshot.data(), id: snapshot.id }) as Review;
+
+/**
+ * Gets a user's reviews newest-first. The next cursor is returned only when
+ * another page exists, so callers can safely offer a "Load older reviews" action.
+ *
+ * Requires the `reviews.toUserId ASC + createdAt DESC` composite index.
+ */
+export async function getReviewsForUser(
+  userId: string,
+  { pageSize = PAGE_SIZE.reviews, cursor = null }: ListReviewsOptions = {}
+): Promise<ReviewPage> {
+  if (!userId) return { reviews: [], cursor: null };
+
+  const safePageSize = Math.max(1, Math.min(pageSize, PAGE_SIZE.reviews));
+  const constraints: QueryConstraint[] = [
+    where('toUserId', '==', userId),
+    orderBy('createdAt', 'desc'),
+  ];
+  if (cursor) constraints.push(startAfter(cursor));
+  constraints.push(limit(safePageSize + 1));
+
+  const snapshot = await getDocs(query(reviewsCol, ...constraints));
+  const visible = snapshot.docs.slice(0, safePageSize);
+
+  return {
+    reviews: visible.map(toReview),
+    cursor: snapshot.docs.length > safePageSize ? visible[visible.length - 1] ?? null : null,
+  };
+}
 
 /**
  * Allows the booked learner to review the session's teacher after completion.

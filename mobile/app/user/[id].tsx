@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ProgressBar } from '@/components/lesson/ProgressBar';
+import { UserReviews } from '@/components/community/UserReviews';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Chip } from '@/components/ui/Chip';
@@ -46,6 +47,8 @@ export default function UserProfileScreen() {
 
   const [messageLoading, setMessageLoading] = useState(false);
   const [messageError, setMessageError] = useState<string | null>(null);
+  const scrollViewRef = useRef<ScrollView>(null);
+  const reviewsOffset = useRef(0);
 
   const isOwnProfile = !!me && me.uid === id;
   const viewerCanLearn = me?.role === 'learner' || me?.role === 'both';
@@ -194,11 +197,21 @@ export default function UserProfileScreen() {
     }
   }
 
+  function scrollToReviews() {
+    scrollViewRef.current?.scrollTo({
+      y: Math.max(0, reviewsOffset.current - spacing.lg),
+      animated: true,
+    });
+  }
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScreenHeader title={isOwnProfile ? 'My profile' : 'Profile'} showBack />
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        ref={scrollViewRef}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}>
         <ProfileHeader
           user={user}
           isOwnProfile={isOwnProfile}
@@ -213,6 +226,7 @@ export default function UserProfileScreen() {
               : undefined
           }
           onMessage={!isOwnProfile && me ? () => void openDirectChat() : undefined}
+          onReviewsPress={user.ratingCount > 0 ? scrollToReviews : undefined}
           messageLoading={messageLoading}
           ctaDisabledReason={
             isOwnProfile
@@ -243,6 +257,14 @@ export default function UserProfileScreen() {
               />
             </View>
           </Card>
+        </View>
+
+        <View
+          style={styles.section}
+          onLayout={(event) => {
+            reviewsOffset.current = event.nativeEvent.layout.y;
+          }}>
+          <UserReviews userId={user.uid} />
         </View>
 
         <View style={styles.section}>

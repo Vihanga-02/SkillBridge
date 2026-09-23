@@ -1,10 +1,9 @@
+import { httpsCallable } from 'firebase/functions';
 import {
   collection,
-  deleteDoc,
   doc,
   getDoc,
   getDocs,
-  getDocsFromServer,
   increment,
   onSnapshot,
   orderBy,
@@ -21,7 +20,7 @@ import {
 import { careerGoalByTag, type CareerGoalTag } from '@/constants/careerGoals';
 import { FILE_LIMITS } from '@/constants/config';
 import { skillByTag } from '@/constants/skills';
-import { auth, db } from '@/firebase/config';
+import { auth, db, functions } from '@/firebase/config';
 import type { Lesson, LessonContent, LessonEnrollment, User } from '@/types';
 import { deleteFile, sanitizeStorageName, uploadFile } from '@/utils/storage';
 
@@ -59,7 +58,6 @@ export type LessonInput = {
 
 const lessonsCol = collection(db, 'lessons');
 const enrollmentsCol = collection(db, 'enrollments');
-const lessonProgressCol = collection(db, 'lessonProgress');
 
 const toLesson = (snapshot: QueryDocumentSnapshot<DocumentData>): Lesson =>
   normalizeLesson({ ...snapshot.data(), id: snapshot.id });
@@ -149,6 +147,7 @@ function normalizeLesson(data: Record<string, unknown>): Lesson {
     ),
     contents: normalizeContents(data.contents),
     published: data.published !== false,
+    enrollmentCount: Number(data.enrollmentCount ?? 0),
     ownerId: String(data.ownerId ?? teacherId),
     ownerName: String(data.ownerName ?? data.teacherName ?? ''),
     ownerAvatarUrl: String(data.ownerAvatarUrl ?? data.teacherAvatarUrl ?? ''),
@@ -399,6 +398,7 @@ export async function createLesson(teacher: User, input: LessonInput): Promise<s
     ...basePayload(teacher, input),
     published: false,
     contents: [],
+    enrollmentCount: 0,
     viewCount: 0,
     completeCount: 0,
     createdAt: serverTimestamp(),
@@ -418,7 +418,7 @@ export async function createLesson(teacher: User, input: LessonInput): Promise<s
     await updateDoc(ref, { contents, published: true, updatedAt: serverTimestamp() });
   } catch (error) {
     await Promise.allSettled(uploadedPaths.map(deleteFile));
-    await deleteDoc(ref);
+    await httpsCallable(functions, 'deleteLesson')({ lessonId: ref.id });
     throw error;
   }
 
@@ -466,37 +466,7 @@ export async function updateLesson(teacher: User, lessonId: string, input: Lesso
     throw error;
   }
 
-  const goal = careerGoalByTag(input.careerGoalId!);
-  const [enrollmentsSnapshot, progressSnapshot] = await Promise.all([
-    getDocs(query(enrollmentsCol, where('lessonId', '==', lessonId))),
-    getDocs(query(lessonProgressCol, where('lessonId', '==', lessonId))),
-  ]);
-  for (let start = 0; start < enrollmentsSnapshot.docs.length; start += 500) {
-    const batch = writeBatch(db);
-    for (const enrollmentDoc of enrollmentsSnapshot.docs.slice(start, start + 500)) {
-      batch.update(enrollmentDoc.ref, {
-        lessonName: input.lessonName.trim(),
-        teacherName: teacher.name,
-        careerGoalId: input.careerGoalId,
-        careerGoalName: goal?.label ?? '',
-        contentCount: nextContents.length,
-        updatedAt: serverTimestamp(),
-      });
-    }
-    await batch.commit();
-  }
-  for (let start = 0; start < progressSnapshot.docs.length; start += 500) {
-    const batch = writeBatch(db);
-    for (const progressDoc of progressSnapshot.docs.slice(start, start + 500)) {
-      batch.update(progressDoc.ref, {
-        lessonTitle: input.lessonName.trim(),
-        skillTag: goal?.skillTags[0] ?? '',
-        updatedAt: serverTimestamp(),
-      });
-    }
-    await batch.commit();
-  }
-
+  // Trusted lesson metadata trigger updates private enrollment/progress records.
   const nextFilePaths = new Set(
     nextContents.flatMap((item) => item.type === 'pdf' ? [item.filePath] : [])
   );
@@ -508,83 +478,17 @@ export async function updateLesson(teacher: User, lessonId: string, input: Lesso
 
 export async function deleteLesson(teacherId: string, lessonId: string): Promise<void> {
   if (auth.currentUser?.uid !== teacherId) throw new Error('Sign in as the lesson creator to delete it.');
-  const blocked = 'This lesson cannot be deleted because learners are currently enrolled.';
-  if (await getLessonEnrollmentCount(lessonId) > 0) throw new Error(blocked);
-  const lessonRef = doc(db, 'lessons', lessonId);
-  const existing = await runTransaction(db, async (transaction) => {
-    const [snapshot, teacher] = await Promise.all([
-      transaction.get(lessonRef), transaction.get(doc(db, 'users', teacherId)),
-    ]);
-    if (!snapshot.exists()) return null;
-    const lesson = normalizeLesson({ ...snapshot.data(), id: snapshot.id });
-    if (lesson.teacherId !== teacherId || !['teacher', 'both'].includes(teacher.data()?.role)) {
-      throw new Error('Only the teacher who created this lesson can delete it.');
-    }
-    if (snapshot.data().deleting === true) throw new Error('Lesson deletion is already in progress.');
-    // Enrollment transactions read this document and retry/reject after this lock.
-    transaction.update(lessonRef, { deleting: true });
-    return lesson;
-  });
-  if (!existing) return;
-  try {
-    // Catch enrollments committed between the initial query and acquiring the lock.
-    if (await getLessonEnrollmentCount(lessonId) > 0) throw new Error(blocked);
-  } catch (error) {
-    await updateDoc(lessonRef, { deleting: false });
-    throw error;
-  }
-
-  // Remove the lesson from learner queries before any irreversible cleanup.
-  await updateDoc(doc(db, 'lessons', lessonId), {
-    published: false,
-    deleting: true,
-    updatedAt: serverTimestamp(),
-  });
-
-  const progressSnapshot = await getDocsFromServer(query(lessonProgressCol, where('lessonId', '==', lessonId)));
-
-  const relatedDocs = progressSnapshot.docs;
-  const maxBatchWrites = 500;
-
-  for (let start = 0; start < relatedDocs.length; start += maxBatchWrites) {
-    const batch = writeBatch(db);
-    for (const relatedDoc of relatedDocs.slice(start, start + maxBatchWrites)) {
-      batch.delete(relatedDoc.ref);
-    }
-    await batch.commit();
-  }
-
-  await Promise.all(
-    existing.contents.flatMap((item) => {
-      if (item.type !== 'pdf' || !item.filePath) return [];
-      const parts = item.filePath.split('/');
-      return parts.length === 4 && parts[0] === 'lesson-files' && parts[1] === teacherId &&
-        parts[2].endsWith(`-${lessonId}`) ? [deleteFile(item.filePath)] : [];
-    })
-  );
-  await deleteDoc(doc(db, 'lessons', lessonId));
+  await httpsCallable(functions, 'deleteLesson')({ lessonId });
 }
 
-export const enrollmentIdFor = (userId: string, lessonId: string): string => `${userId}_${lessonId}`;
+export const enrollmentIdFor = (userId: string, lessonId: string): string => userId + '_' + lessonId;
 
-/** Completed learners remain enrolled. Legacy duplicates count only once. */
-export function countEnrolledUsers(records: Record<string, unknown>[]): number {
-  return new Set(records.filter((row) =>
-    typeof row.userId === 'string' && row.userId.length > 0 && row.active !== false &&
-    !['cancelled', 'canceled', 'removed', 'unenrolled'].includes(String(row.status))
-  ).map((row) => row.userId)).size;
-}
-
-export async function getLessonEnrollmentCount(lessonId: string): Promise<number> {
-  const snapshot = await getDocsFromServer(query(enrollmentsCol, where('lessonId', '==', lessonId)));
-  return countEnrolledUsers(snapshot.docs.map((row) => row.data()));
-}
-
-export function subscribeToLessonEnrollmentCount(
-  lessonId: string, onValue: (count: number) => void, onError: (error: Error) => void
+/** Public counts observe only the lesson document, never learner records. */
+export function subscribeToLesson(
+  lessonId: string, onValue: (lesson: Lesson | null) => void, onError: (error: Error) => void
 ): () => void {
-  return onSnapshot(query(enrollmentsCol, where('lessonId', '==', lessonId)),
-    (snapshot) => onValue(countEnrolledUsers(snapshot.docs.map((row) => row.data()))), onError);
+  return onSnapshot(doc(db, 'lessons', lessonId), (snapshot) =>
+    onValue(snapshot.exists() ? normalizeLesson({ ...snapshot.data(), id: snapshot.id }) : null), onError);
 }
 
 export async function getEnrollment(userId: string, lessonId: string): Promise<LessonEnrollment | null> {
@@ -612,56 +516,8 @@ export async function listEnrollmentIds(userId: string): Promise<Set<string>> {
 }
 
 export async function enrollInLesson(user: User, lesson: Lesson): Promise<void> {
-  if (user.role === 'teacher') throw new Error('Switch to Teach & learn before enrolling in lessons.');
-
-  const enrollmentId = enrollmentIdFor(user.uid, lesson.id);
-  const enrollmentRef = doc(db, 'enrollments', enrollmentId);
-  const progressRef = doc(db, 'lessonProgress', enrollmentId);
-  const lessonRef = doc(db, 'lessons', lesson.id);
-  await runTransaction(db, async (transaction) => {
-    const [lessonSnapshot, enrollmentSnapshot] = await Promise.all([
-      transaction.get(lessonRef),
-      transaction.get(enrollmentRef),
-    ]);
-    if (enrollmentSnapshot.exists()) return;
-    if (!lessonSnapshot.exists() || lessonSnapshot.data().published !== true || lessonSnapshot.data().deleting === true) {
-      throw new Error('This lesson is no longer available for enrollment.');
-    }
-
-    const currentLesson = normalizeLesson({ ...lessonSnapshot.data(), id: lessonSnapshot.id });
-    transaction.set(enrollmentRef, {
-      id: enrollmentId,
-      userId: user.uid,
-      lessonId: currentLesson.id,
-      lessonName: currentLesson.lessonName,
-      teacherId: currentLesson.teacherId,
-      teacherName: currentLesson.teacherName,
-      careerGoalId: currentLesson.careerGoalId,
-      careerGoalName: currentLesson.careerGoalName,
-      contentCount: currentLesson.contents.length,
-      completedContentIds: [],
-      progress: 0,
-      completed: false,
-      completedAt: null,
-      enrolledAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-    transaction.set(progressRef, {
-      id: enrollmentId,
-      userId: user.uid,
-      lessonId: currentLesson.id,
-      lessonTitle: currentLesson.lessonName,
-      skillTag: currentLesson.skillTag,
-      status: 'in_progress',
-      lastCardIndex: 0,
-      quizScore: 0,
-      quizAttempts: 0,
-      minutesSpent: 0,
-      startedAt: serverTimestamp(),
-      completedAt: null,
-      updatedAt: serverTimestamp(),
-    }, { merge: true });
-  });
+  if (auth.currentUser?.uid !== user.uid) throw new Error('Sign in before enrolling.');
+  await httpsCallable(functions, 'enrollLesson')({ lessonId: lesson.id });
 }
 
 function calculateProgress(completedIds: string[], lesson: Lesson): number {

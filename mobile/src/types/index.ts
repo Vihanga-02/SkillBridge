@@ -204,6 +204,7 @@ export type Lesson = {
   durationMins: number;
   quiz: QuizQuestion[];
   quizSource: 'gemini' | 'manual';
+  enrollmentCount?: number;
   viewCount: number;
   completeCount: number;
   createdAt: Timestamp | null;

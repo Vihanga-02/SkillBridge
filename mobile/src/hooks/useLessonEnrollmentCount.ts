@@ -1,5 +1,5 @@
 import { useCallback, useSyncExternalStore } from 'react';
-import { subscribeToLessonEnrollmentCount } from '@/services/lessonService';
+import { subscribeToLesson } from '@/services/lessonService';
 
 type State = { count: number | null; error: boolean };
 const pending: State = { count: null, error: false };
@@ -21,8 +21,8 @@ export function useLessonEnrollmentCount(lessonId: string): State {
         current.state = state;
         current.listeners.forEach((listener) => listener());
       };
-      entry.stop = subscribeToLessonEnrollmentCount(lessonId,
-        (count) => publish({ count, error: false }),
+      entry.stop = subscribeToLesson(lessonId,
+        (lesson) => publish({ count: lesson ? lesson.enrollmentCount ?? 0 : null, error: !lesson }),
         () => publish({ count: null, error: true }));
     }
     return () => {

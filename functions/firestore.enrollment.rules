@@ -1,0 +1,50 @@
+// Merge these scoped matches into the deployed rules. This is NOT a complete
+// application ruleset: other collections must retain their existing policies.
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function teacher() {
+      return signedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['teacher', 'both'];
+    }
+    match /lessons/{lessonId} {
+      allow read: if resource.data.published == true ||
+        (signedIn() && resource.data.teacherId == request.auth.uid);
+      allow create: if teacher() && request.resource.data.teacherId == request.auth.uid
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.enrollmentCount == 0
+        && !request.resource.data.keys().hasAny(['deleting']);
+      allow update: if teacher() && resource.data.teacherId == request.auth.uid
+        && resource.data.get('deleting', false) == false
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'teacherName', 'teacherAvatarUrl', 'lessonName', 'careerGoalId', 'careerGoalName',
+          'published', 'ownerName', 'ownerAvatarUrl', 'title', 'description', 'skillTag',
+          'category', 'level', 'format', 'content', 'cards', 'mediaUrl', 'mediaPath',
+          'mediaSizeBytes', 'thumbnailUrl', 'durationMins', 'quiz', 'quizSource', 'contents', 'updatedAt'
+        ]);
+      // Preserve the existing completion-counter flow without allowing changes
+      // to enrollmentCount, ownership or the backend deletion lock.
+      allow update: if signedIn() && resource.data.published == true
+        && resource.data.get('deleting', false) == false
+        && (resource.data.teacherId == request.auth.uid ||
+          exists(/databases/$(database)/documents/enrollments/$(request.auth.uid + '_' + lessonId)))
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['completeCount', 'updatedAt'])
+        && request.resource.data.completeCount is int
+        && request.resource.data.completeCount >= 0
+        && (request.resource.data.completeCount == resource.data.completeCount + 1 ||
+            request.resource.data.completeCount == resource.data.completeCount - 1);
+      allow delete: if false; // Trusted callable checks actual enrollment existence.
+    }
+    match /enrollments/{enrollmentId} {
+      allow get: if signedIn() &&
+        (!exists(/databases/$(database)/documents/enrollments/$(enrollmentId)) ||
+          resource.data.userId == request.auth.uid);
+      allow list: if signedIn() && resource.data.userId == request.auth.uid;
+      allow create, delete: if false; // Trusted enrollment transaction only.
+      allow update: if signedIn() && resource.data.userId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'contentCount', 'completedContentIds', 'progress', 'completed', 'completedAt', 'updatedAt'
+        ]);
+    }
+  }
+}

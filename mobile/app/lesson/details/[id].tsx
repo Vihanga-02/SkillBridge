@@ -40,7 +40,7 @@ export default function LessonDetailsScreen() {
 
       setLesson(row);
       setEnrollment(
-        row.teacherId === profile.uid || profile.role === 'teacher'
+        profile.role === 'teacher'
           ? null
           : await getEnrollment(profile.uid, row.id)
       );
@@ -64,6 +64,7 @@ export default function LessonDetailsScreen() {
     try {
       await enrollInLesson(profile, lesson);
       setEnrollment(await getEnrollment(profile.uid, lesson.id));
+      setLesson(await getLesson(lesson.id));
     } catch (enrollError) {
       setError(errorMessage(enrollError));
     } finally {
@@ -100,7 +101,7 @@ export default function LessonDetailsScreen() {
 
             <Card>
               <View style={styles.infoCard}>
-                <EnrollmentCount lessonId={lesson.id} />
+                <EnrollmentCount count={lesson.enrollmentCount} />
                 <InfoRow icon="flag-outline" label="Career Goal" value={lesson.careerGoalName || 'Not specified'} />
                 <Pressable
                   onPress={() => router.push({ pathname: '/user/[id]', params: { id: lesson.teacherId } })}
@@ -149,7 +150,11 @@ export default function LessonDetailsScreen() {
 
             {isOwnLesson ? (
               <View style={styles.actions}>
-                <Notice tone="info" message="Your lesson" />
+                <Notice tone="info" message={enrollment ? 'Your lesson ? Enrolled as a learner' : 'Your lesson'} />
+                {canLearn && !enrollment ? (
+                  <Button label="Enroll as learner" icon="add-outline" loading={enrolling}
+                    disabled={lesson.deleting} onPress={() => void enroll()} />
+                ) : null}
                 <Button
                   label="View Lesson"
                   icon="eye-outline"
@@ -184,6 +189,7 @@ export default function LessonDetailsScreen() {
                 label="Enroll"
                 icon="add-outline"
                 loading={enrolling}
+                disabled={lesson.deleting}
                 onPress={() => void enroll()}
               />
             ) : (

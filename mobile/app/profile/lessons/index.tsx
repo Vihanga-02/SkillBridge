@@ -15,7 +15,7 @@ import { Notice } from '@/components/ui/Notice';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { colors, radius, sizes, spacing, type } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
-import { deleteLesson, listEnrollmentsByUser, listLessonsByTeacher } from '@/services/lessonService';
+import { deleteLesson, listEnrollmentsByUser, listLessonsByTeacher, listLessonsByIds } from '@/services/lessonService';
 import type { Lesson, LessonEnrollment } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
 
@@ -24,6 +24,7 @@ type LessonTab = 'created' | 'enrolled';
 export default function MyLessonsScreen() {
   const { profile } = useAuth();
   const [createdLessons, setCreatedLessons] = useState<Lesson[]>([]);
+  const [enrolledLessons, setEnrolledLessons] = useState<Lesson[]>([]);
   const [enrollments, setEnrollments] = useState<LessonEnrollment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -46,7 +47,8 @@ export default function MyLessonsScreen() {
         canLearn ? listEnrollmentsByUser(profile.uid) : Promise.resolve([]),
       ]);
       setCreatedLessons(createdRows);
-      setEnrollments(enrolledRows.filter((enrollment) => enrollment.teacherId !== profile.uid));
+      setEnrollments(enrolledRows);
+      setEnrolledLessons(await listLessonsByIds(enrolledRows.map((row) => row.lessonId)));
     } catch (loadError) {
       setError(errorMessage(loadError));
     } finally {
@@ -78,6 +80,7 @@ export default function MyLessonsScreen() {
               await deleteLesson(profile!.uid, lesson.id);
               setCreatedLessons((current) => current.filter((item) => item.id !== lesson.id));
             } catch (deleteError) {
+              await load();
               setError(errorMessage(deleteError));
             } finally {
               setDeletingId(null);
@@ -88,6 +91,7 @@ export default function MyLessonsScreen() {
     );
   }
 
+  const enrolledLessonById = new Map(enrolledLessons.map((lesson) => [lesson.id, lesson]));
   const showGlobalEmpty =
     !dualRole && !loading && createdLessons.length === 0 && enrollments.length === 0;
 
@@ -176,7 +180,7 @@ export default function MyLessonsScreen() {
                           <Text style={styles.meta}>
                             {lesson.contents.length} content {lesson.contents.length === 1 ? 'item' : 'items'}
                           </Text>
-                          <EnrollmentCount lessonId={lesson.id} />
+                          <EnrollmentCount count={lesson.enrollmentCount} />
 
                           <View style={styles.actions}>
                             <Button
@@ -192,7 +196,9 @@ export default function MyLessonsScreen() {
                               style={styles.actionButton}
                             />
                             <DeleteLessonButton
-                              lessonId={lesson.id}
+                              count={lesson.enrollmentCount}
+                             
+                              deleting={lesson.deleting}
                               loading={deletingId === lesson.id}
                               onPress={() => confirmDelete(lesson)}
                               style={styles.actionButton}
@@ -217,30 +223,34 @@ export default function MyLessonsScreen() {
                   />
                 ) : (
                   <View style={styles.list}>
-                    {enrollments.map((enrollment) => (
-                      <Card key={enrollment.id}>
-                        <View style={styles.cardBody}>
-                          <Text style={styles.title}>{enrollment.lessonName}</Text>
-                          <Text style={styles.meta}>Career Goal: {enrollment.careerGoalName}</Text>
-                          <Text style={styles.meta}>By {enrollment.teacherName || 'SkillBridge teacher'}</Text>
-                          <Text style={styles.meta}>
-                            {enrollment.contentCount} content {enrollment.contentCount === 1 ? 'item' : 'items'}
-                          </Text>
-                          <EnrollmentCount lessonId={enrollment.lessonId} />
-                          <ProgressBar
-                            progress={enrollment.progress}
-                            completed={enrollment.completed}
-                          />
-                          <Button
-                            label={enrollment.completed ? 'Review Lesson' : 'Continue Learning'}
-                            icon="play-outline"
-                            onPress={() =>
-                              router.push({ pathname: '/lesson/[id]', params: { id: enrollment.lessonId } })
-                            }
-                          />
-                        </View>
-                      </Card>
-                    ))}
+                    {enrollments.map((enrollment) => {
+                      const lesson = enrolledLessonById.get(enrollment.lessonId);
+                      const contentCount = lesson?.contents.length ?? enrollment.contentCount;
+                      return (
+                        <Card key={enrollment.id}>
+                          <View style={styles.cardBody}>
+                            <Text style={styles.title}>{lesson?.lessonName ?? enrollment.lessonName}</Text>
+                            <Text style={styles.meta}>Career Goal: {lesson?.careerGoalName ?? enrollment.careerGoalName}</Text>
+                            <Text style={styles.meta}>By {lesson?.teacherName || enrollment.teacherName || 'SkillBridge teacher'}</Text>
+                            <Text style={styles.meta}>
+                              {contentCount} content {contentCount === 1 ? 'item' : 'items'}
+                            </Text>
+                            <EnrollmentCount count={lesson?.enrollmentCount} />
+                            <ProgressBar
+                              progress={enrollment.progress}
+                              completed={enrollment.completed}
+                            />
+                            <Button
+                              label={enrollment.completed ? 'Review Lesson' : 'Continue Learning'}
+                              icon="play-outline"
+                              onPress={() =>
+                                router.push({ pathname: '/lesson/[id]', params: { id: enrollment.lessonId } })
+                              }
+                            />
+                          </View>
+                        </Card>
+                      );
+                    })}
                   </View>
                 )}
               </View>

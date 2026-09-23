@@ -1,8 +1,8 @@
 import { EnrollmentCount } from '@/components/lesson/EnrollmentCount';
 import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
-import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
@@ -40,7 +40,7 @@ export default function LessonDetailScreen() {
   const [savingContentId, setSavingContentId] = useState<string | null>(null);
   const [accessDenied, setAccessDenied] = useState(false);
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     if (!id || !profile) return;
 
     let active = true;
@@ -48,6 +48,8 @@ export default function LessonDetailScreen() {
       setLoading(true);
       setError(null);
       setAccessDenied(false);
+      setLesson(null);
+      setEnrollment(null);
       try {
         const row = await getLesson(id);
         if (!active) return;
@@ -74,7 +76,7 @@ export default function LessonDetailScreen() {
     return () => {
       active = false;
     };
-  }, [id, profile]);
+  }, [id, profile]));
 
   async function toggleContentDone(contentId: string) {
     if (!profile || !lesson || !enrollment) return;
@@ -124,7 +126,7 @@ export default function LessonDetailScreen() {
                 <Text style={styles.meta}>
                   {lesson.contents.length} content {lesson.contents.length === 1 ? 'item' : 'items'}
                 </Text>
-                          <EnrollmentCount lessonId={lesson.id} />
+                <EnrollmentCount count={lesson.enrollmentCount} />
                 {enrollment ? (
                   <ProgressBar progress={enrollment.progress} completed={enrollment.completed} />
                 ) : null}

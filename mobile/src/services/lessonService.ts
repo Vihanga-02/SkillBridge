@@ -1,6 +1,6 @@
 import {
   collection,
-  deleteDoc,
+  documentId,
   doc,
   getDoc,
   getDocs,
@@ -11,7 +11,6 @@ import {
   query,
   runTransaction,
   serverTimestamp,
-  updateDoc,
   where,
   writeBatch,
   type DocumentData,
@@ -117,7 +116,7 @@ function normalizeContents(value: unknown): LessonContent[] {
         title: String(data.title ?? data.fileName ?? 'PDF'),
         fileName: String(data.fileName ?? ''),
         fileUrl: String(data.fileUrl ?? ''),
-        filePath: String(data.filePath ?? ''),
+        filePath: String(data.filePath || data.storagePath || ''),
         fileSizeBytes: Number(data.fileSizeBytes ?? 0),
         createdAt: (data.createdAt as LessonContent['createdAt']) ?? null,
         updatedAt: (data.updatedAt as LessonContent['updatedAt']) ?? null,
@@ -136,6 +135,9 @@ function normalizeLesson(data: Record<string, unknown>): Lesson {
     ...data,
     id: String(data.id),
     teacherId,
+    enrollmentCount: typeof data.enrollmentCount === 'number' &&
+      Number.isSafeInteger(data.enrollmentCount) && data.enrollmentCount >= 0
+      ? data.enrollmentCount : undefined,
     teacherName: String(data.teacherName ?? data.ownerName ?? ''),
     teacherAvatarUrl: String(data.teacherAvatarUrl ?? data.ownerAvatarUrl ?? ''),
     lessonName: title,
@@ -399,6 +401,9 @@ export async function createLesson(teacher: User, input: LessonInput): Promise<s
     ...basePayload(teacher, input),
     published: false,
     contents: [],
+    enrollmentCount: 0,
+    enrollmentCountVersion: 1,
+    deleting: false,
     viewCount: 0,
     completeCount: 0,
     createdAt: serverTimestamp(),
@@ -415,10 +420,16 @@ export async function createLesson(teacher: User, input: LessonInput): Promise<s
       [],
       uploadedPaths
     );
-    await updateDoc(ref, { contents, published: true, updatedAt: serverTimestamp() });
+    await runTransaction(db, async (transaction) => {
+      const snapshot = await transaction.get(ref);
+      if (!snapshot.exists() || snapshot.data().deleting === true) {
+        throw new Error('This lesson is no longer available.');
+      }
+      transaction.update(ref, { contents, published: true, updatedAt: serverTimestamp() });
+    });
   } catch (error) {
     await Promise.allSettled(uploadedPaths.map(deleteFile));
-    await deleteDoc(ref);
+    await deleteLesson(teacher.uid, ref.id);
     throw error;
   }
 
@@ -432,6 +443,7 @@ export async function updateLesson(teacher: User, lessonId: string, input: Lesso
   const existing = await getLesson(lessonId);
   if (!existing) throw new Error('That lesson no longer exists.');
   if (existing.teacherId !== teacher.uid) throw new Error('Only the teacher who created this lesson can edit it.');
+  if (existing.deleting) throw new Error('This lesson is being deleted and can no longer be edited.');
 
   const uploadedPaths: string[] = [];
   let nextContents: LessonContent[];
@@ -449,7 +461,7 @@ export async function updateLesson(teacher: User, lessonId: string, input: Lesso
     await runTransaction(db, async (transaction) => {
       const currentSnapshot = await transaction.get(lessonRef);
       if (!currentSnapshot.exists()) throw new Error('That lesson no longer exists.');
-      if (currentSnapshot.data().teacherId !== teacher.uid) {
+      if ((currentSnapshot.data().teacherId ?? currentSnapshot.data().ownerId) !== teacher.uid) {
         throw new Error('Only the teacher who created this lesson can edit it.');
       }
       if (currentSnapshot.data().deleting === true) {
@@ -466,37 +478,6 @@ export async function updateLesson(teacher: User, lessonId: string, input: Lesso
     throw error;
   }
 
-  const goal = careerGoalByTag(input.careerGoalId!);
-  const [enrollmentsSnapshot, progressSnapshot] = await Promise.all([
-    getDocs(query(enrollmentsCol, where('lessonId', '==', lessonId))),
-    getDocs(query(lessonProgressCol, where('lessonId', '==', lessonId))),
-  ]);
-  for (let start = 0; start < enrollmentsSnapshot.docs.length; start += 500) {
-    const batch = writeBatch(db);
-    for (const enrollmentDoc of enrollmentsSnapshot.docs.slice(start, start + 500)) {
-      batch.update(enrollmentDoc.ref, {
-        lessonName: input.lessonName.trim(),
-        teacherName: teacher.name,
-        careerGoalId: input.careerGoalId,
-        careerGoalName: goal?.label ?? '',
-        contentCount: nextContents.length,
-        updatedAt: serverTimestamp(),
-      });
-    }
-    await batch.commit();
-  }
-  for (let start = 0; start < progressSnapshot.docs.length; start += 500) {
-    const batch = writeBatch(db);
-    for (const progressDoc of progressSnapshot.docs.slice(start, start + 500)) {
-      batch.update(progressDoc.ref, {
-        lessonTitle: input.lessonName.trim(),
-        skillTag: goal?.skillTags[0] ?? '',
-        updatedAt: serverTimestamp(),
-      });
-    }
-    await batch.commit();
-  }
-
   const nextFilePaths = new Set(
     nextContents.flatMap((item) => item.type === 'pdf' ? [item.filePath] : [])
   );
@@ -509,9 +490,9 @@ export async function updateLesson(teacher: User, lessonId: string, input: Lesso
 export async function deleteLesson(teacherId: string, lessonId: string): Promise<void> {
   if (auth.currentUser?.uid !== teacherId) throw new Error('Sign in as the lesson creator to delete it.');
   const blocked = 'This lesson cannot be deleted because learners are currently enrolled.';
-  if (await getLessonEnrollmentCount(lessonId) > 0) throw new Error(blocked);
   const lessonRef = doc(db, 'lessons', lessonId);
-  const existing = await runTransaction(db, async (transaction) => {
+  const attemptToken = doc(collection(db, '_ids')).id;
+  const locked = await runTransaction(db, async (transaction) => {
     const [snapshot, teacher] = await Promise.all([
       transaction.get(lessonRef), transaction.get(doc(db, 'users', teacherId)),
     ]);
@@ -520,71 +501,106 @@ export async function deleteLesson(teacherId: string, lessonId: string): Promise
     if (lesson.teacherId !== teacherId || !['teacher', 'both'].includes(teacher.data()?.role)) {
       throw new Error('Only the teacher who created this lesson can delete it.');
     }
-    if (snapshot.data().deleting === true) throw new Error('Lesson deletion is already in progress.');
-    // Enrollment transactions read this document and retry/reject after this lock.
-    transaction.update(lessonRef, { deleting: true });
-    return lesson;
+    requireEnrollmentAggregate(snapshot.data());
+    if (lesson.enrollmentCount !== 0) throw new Error(blocked);
+    const token = lesson.deleting && snapshot.data().deletionToken
+      ? String(snapshot.data().deletionToken) : attemptToken;
+    // Both operations write this document; Firestore retries the losing transaction.
+    if (!lesson.deleting) {
+      transaction.update(lessonRef, {
+        deleting: true,
+        published: false,
+        deletionCleanupStarted: false,
+        deletionWasPublished: lesson.published,
+        deletionToken: token,
+      });
+    } else if (!snapshot.data().deletionToken) {
+      // Preserve a legacy interrupted lock, with an identity for safe retries.
+      transaction.update(lessonRef, { deletionToken: token });
+    }
+    return { lesson, token };
   });
-  if (!existing) return;
+  if (!locked) return;
+  const { lesson: existing, token } = locked;
+  const releasePreparationLock = () => runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(lessonRef);
+    const data = snapshot.data();
+    if (data && (data.teacherId ?? data.ownerId) === teacherId && data.deleting === true && data.deletionToken === token &&
+        data.deletionCleanupStarted === false && data.enrollmentCount === 0) {
+      transaction.update(lessonRef, { deleting: false, published: data.deletionWasPublished === true });
+    }
+  }).catch(() => undefined); // If release fails, the original lock remains retryable.
+  // Keep the lock and immutable file manifest on failure. A retry resumes cleanup.
+  let progressSnapshot;
   try {
-    // Catch enrollments committed between the initial query and acquiring the lock.
-    if (await getLessonEnrollmentCount(lessonId) > 0) throw new Error(blocked);
+    progressSnapshot = await getDocsFromServer(query(lessonProgressCol, where('lessonId', '==', lessonId)));
   } catch (error) {
-    await updateDoc(lessonRef, { deleting: false });
+    // Only release a fresh lock when no attempt has begun destructive cleanup.
+    // An interrupted legacy deletion without this marker must remain locked.
+    await releasePreparationLock();
     throw error;
   }
-
-  // Remove the lesson from learner queries before any irreversible cleanup.
-  await updateDoc(doc(db, 'lessons', lessonId), {
-    published: false,
-    deleting: true,
-    updatedAt: serverTimestamp(),
-  });
-
-  const progressSnapshot = await getDocsFromServer(query(lessonProgressCol, where('lessonId', '==', lessonId)));
-
-  const relatedDocs = progressSnapshot.docs;
-  const maxBatchWrites = 500;
-
-  for (let start = 0; start < relatedDocs.length; start += maxBatchWrites) {
-    const batch = writeBatch(db);
-    for (const relatedDoc of relatedDocs.slice(start, start + maxBatchWrites)) {
-      batch.delete(relatedDoc.ref);
+  const canClean = await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(lessonRef);
+    if (!snapshot.exists()) return false; // Another retry completed the deletion.
+    const data = snapshot.data();
+    requireEnrollmentAggregate(data);
+    if ((data.teacherId ?? data.ownerId) !== teacherId || data.deleting !== true || data.enrollmentCount !== 0 ||
+        data.deletionToken !== token) {
+      throw new Error('Deletion was cancelled. Please retry deleting this lesson.');
     }
+    transaction.update(lessonRef, { deletionCleanupStarted: true });
+    return true;
+  }).catch(async (error) => {
+    await releasePreparationLock();
+    throw error;
+  });
+  if (!canClean) return;
+  for (let start = 0; start < progressSnapshot.docs.length; start += 500) {
+    const batch = writeBatch(db);
+    for (const row of progressSnapshot.docs.slice(start, start + 500)) batch.delete(row.ref);
     await batch.commit();
   }
-
-  await Promise.all(
-    existing.contents.flatMap((item) => {
-      if (item.type !== 'pdf' || !item.filePath) return [];
-      const parts = item.filePath.split('/');
-      return parts.length === 4 && parts[0] === 'lesson-files' && parts[1] === teacherId &&
-        parts[2].endsWith(`-${lessonId}`) ? [deleteFile(item.filePath)] : [];
-    })
-  );
-  await deleteDoc(doc(db, 'lessons', lessonId));
+  const paths = new Set([
+    ...existing.contents.flatMap((item) => item.type === 'pdf' ? [item.filePath] : []),
+    existing.mediaPath,
+    String((existing as Lesson & { storagePath?: string }).storagePath ?? ''),
+  ].filter(Boolean));
+  for (const path of paths) {
+    const parts = path.split('/');
+    const current = parts.length === 4 && parts[0] === 'lesson-files' &&
+      parts[1] === teacherId && parts[2].endsWith('-' + lessonId);
+    const legacy = parts.length === 3 && parts[0] === 'lessons' && parts[1] === lessonId;
+    if (current || legacy) await deleteFile(path);
+  }
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(lessonRef);
+    if (!snapshot.exists()) return;
+    requireEnrollmentAggregate(snapshot.data());
+    if ((snapshot.data().teacherId ?? snapshot.data().ownerId) !== teacherId || snapshot.data().deleting !== true ||
+        snapshot.data().enrollmentCount !== 0 || snapshot.data().deletionToken !== token) throw new Error(blocked);
+    transaction.delete(lessonRef);
+  });
 }
 
 export const enrollmentIdFor = (userId: string, lessonId: string): string => `${userId}_${lessonId}`;
 
-/** Completed learners remain enrolled. Legacy duplicates count only once. */
-export function countEnrolledUsers(records: Record<string, unknown>[]): number {
-  return new Set(records.filter((row) =>
-    typeof row.userId === 'string' && row.userId.length > 0 && row.active !== false &&
-    !['cancelled', 'canceled', 'removed', 'unenrolled'].includes(String(row.status))
-  ).map((row) => row.userId)).size;
+function requireEnrollmentAggregate(data: DocumentData): void {
+  if (!Number.isSafeInteger(data.enrollmentCount) ||
+      data.enrollmentCount < 0) {
+    throw new Error('This lesson needs an administrator enrollment-count reconciliation before enrollment or deletion.');
+  }
 }
 
-export async function getLessonEnrollmentCount(lessonId: string): Promise<number> {
-  const snapshot = await getDocsFromServer(query(enrollmentsCol, where('lessonId', '==', lessonId)));
-  return countEnrolledUsers(snapshot.docs.map((row) => row.data()));
-}
-
-export function subscribeToLessonEnrollmentCount(
-  lessonId: string, onValue: (count: number) => void, onError: (error: Error) => void
-): () => void {
-  return onSnapshot(query(enrollmentsCol, where('lessonId', '==', lessonId)),
-    (snapshot) => onValue(countEnrolledUsers(snapshot.docs.map((row) => row.data()))), onError);
+/** Fetch normal lesson metadata in batches, never learner records for counts. */
+export async function listLessonsByIds(ids: string[]): Promise<Lesson[]> {
+  const unique = [...new Set(ids)];
+  const rows: Lesson[] = [];
+  for (let start = 0; start < unique.length; start += 30) {
+    const snapshot = await getDocs(query(lessonsCol, where(documentId(), 'in', unique.slice(start, start + 30))));
+    rows.push(...snapshot.docs.map(toLesson));
+  }
+  return rows;
 }
 
 export async function getEnrollment(userId: string, lessonId: string): Promise<LessonEnrollment | null> {
@@ -628,7 +644,9 @@ export async function enrollInLesson(user: User, lesson: Lesson): Promise<void> 
       throw new Error('This lesson is no longer available for enrollment.');
     }
 
+    requireEnrollmentAggregate(lessonSnapshot.data());
     const currentLesson = normalizeLesson({ ...lessonSnapshot.data(), id: lessonSnapshot.id });
+    transaction.update(lessonRef, { enrollmentCount: currentLesson.enrollmentCount! + 1 });
     transaction.set(enrollmentRef, {
       id: enrollmentId,
       userId: user.uid,

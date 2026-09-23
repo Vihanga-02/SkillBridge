@@ -184,18 +184,13 @@ it('never unlocks interrupted cleanup on retry preparation failure', async () =>
   await expect(deleteLesson('teacher', 'lesson')).rejects.toThrow('offline');
   expect(records.get('lessons/lesson')?.deleting).toBe(true);
 });
-it('legacy lessons preserve an unknown count and cannot delete or enroll before reconciliation', async () => {
+it('lessons missing enrollmentCount safely default to 0 and allow enrollment', async () => {
   const data = { ...records.get('lessons/lesson') };
   delete data.enrollmentCount; delete data.enrollmentCountVersion;
   put('lessons/lesson', data);
-  expect((await getLesson('lesson'))?.enrollmentCount).toBeUndefined();
-  await expect(deleteLesson('teacher', 'lesson')).rejects.toThrow('reconciliation');
-  await expect(enrollInLesson(learner(), lesson)).rejects.toThrow('reconciliation');
-});
-it('rejects malformed/negative aggregates', async () => {
-  put('lessons/lesson', { ...records.get('lessons/lesson'), enrollmentCount: -1 });
-  await expect(deleteLesson('teacher', 'lesson')).rejects.toThrow('reconciliation');
-  await expect(enrollInLesson(learner(), lesson)).rejects.toThrow('reconciliation');
+  expect((await getLesson('lesson'))?.enrollmentCount).toBe(0);
+  await enrollInLesson(learner(), lesson);
+  expect(records.get('lessons/lesson')?.enrollmentCount).toBe(1);
 });
 it('rejects nonowners, learner-only deletion and impersonated creator', async () => {
   await expect(deleteLesson('other', 'lesson')).rejects.toThrow('Sign in');

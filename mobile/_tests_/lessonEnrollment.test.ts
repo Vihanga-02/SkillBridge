@@ -9,24 +9,13 @@ jest.mock('firebase/firestore', () => ({
 import { onSnapshot, getDocs, getDoc, runTransaction } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { auth } from '@/firebase/config';
-import { deleteLesson, enrollInLesson, subscribeToLesson, getEnrollment, listEnrollmentsByUser, toggleLessonContentDone, markLessonCompleted } from '@/services/lessonService';
+import { deleteLesson, enrollInLesson, listLessons, listEnrollmentIds, getEnrollment, listEnrollmentsByUser, toggleLessonContentDone, markLessonCompleted } from '@/services/lessonService';
 const call = jest.fn();
 beforeEach(() => {
   jest.clearAllMocks();
   (httpsCallable as jest.Mock).mockReturnValue(call);
   call.mockReset().mockResolvedValue({ data: {} });
   (auth as any).currentUser = { uid: 'learner' };
-});
-it.each([undefined, 0, 2])('reads aggregate %s only from the lesson document', (count) => {
-  const stop = jest.fn(), value = jest.fn();
-  (onSnapshot as jest.Mock).mockImplementation((ref, next) => {
-    expect(ref.path).toBe('lessons/lesson');
-    next({ exists: () => true, id: 'lesson', data: () => ({ enrollmentCount: count }) });
-    return stop;
-  });
-  expect(subscribeToLesson('lesson', value, jest.fn())).toBe(stop);
-  expect(value.mock.calls[0][0].enrollmentCount).toBe(count ?? 0);
-  expect(getDocs).not.toHaveBeenCalled();
 });
 it('delegates enrollment to authenticated backend without client writes', async () => {
   await enrollInLesson({ uid: 'learner' } as any, { id: 'lesson', enrollmentCount: 999 } as any);
@@ -46,16 +35,6 @@ it('rejects impersonation before invoking either operation', async () => {
   await expect(enrollInLesson({ uid: 'other' } as any, { id: 'lesson' } as any)).rejects.toThrow('Sign in');
   expect(call).not.toHaveBeenCalled();
 });
-it('propagates listener errors and missing lessons', () => {
-  const value = jest.fn(), error = jest.fn(), denied = new Error('permission-denied');
-  (onSnapshot as jest.Mock).mockImplementation((_ref, next, fail) => {
-    next({ exists: () => false }); fail(denied);
-  });
-  subscribeToLesson('lesson', value, error);
-  expect(value).toHaveBeenCalledWith(null);
-  expect(error).toHaveBeenCalledWith(denied);
-});
-
 const row = (id: string, data: object) => ({ id, data: () => data });
 it('excludes inactive history, duplicate cards and missing or inaccessible lessons', async () => {
   (getDocs as jest.Mock).mockResolvedValue({ docs: [
@@ -97,4 +76,21 @@ it('both progress operations reject an enrollment cancelled after the initial lo
   await expect(toggleLessonContentDone(user, lesson, 'content')).rejects.toThrow('Enroll in this lesson');
   await expect(markLessonCompleted(user, lesson)).rejects.toThrow('Enroll in this lesson');
   expect(update).not.toHaveBeenCalled();
+});
+
+it('loads 100 counts with the existing lesson query and no per-lesson calls', async () => {
+  (getDocs as jest.Mock).mockResolvedValue({ docs: Array.from({ length: 100 }, (_, i) => row(String(i), { enrollmentCount: i })) });
+  const lessons = await listLessons();
+  expect(lessons).toHaveLength(100);
+  expect(lessons[25].enrollmentCount).toBe(25);
+  expect(getDocs).toHaveBeenCalledTimes(1);
+  expect(getDoc).not.toHaveBeenCalled();
+  expect(onSnapshot).not.toHaveBeenCalled();
+});
+it('feed enrollment IDs query only own records without loading each lesson again', async () => {
+  (getDocs as jest.Mock).mockResolvedValue({ docs: [row('a', { lessonId: 'l' }), row('b', { lessonId: 'inactive', active: false })] });
+  expect(await listEnrollmentIds('learner')).toEqual(new Set(['l']));
+  expect(getDocs).toHaveBeenCalledTimes(1);
+  expect(getDoc).not.toHaveBeenCalled();
+  expect(onSnapshot).not.toHaveBeenCalled();
 });

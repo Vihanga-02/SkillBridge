@@ -124,7 +124,7 @@ export default function LessonDetailScreen() {
                 <Text style={styles.meta}>
                   {lesson.contents.length} content {lesson.contents.length === 1 ? 'item' : 'items'}
                 </Text>
-                          <EnrollmentCount lessonId={lesson.id} />
+                          <EnrollmentCount count={lesson.enrollmentCount ?? 0} />
                 {enrollment ? (
                   <ProgressBar progress={enrollment.progress} completed={enrollment.completed} />
                 ) : null}

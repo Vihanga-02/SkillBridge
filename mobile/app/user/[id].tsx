@@ -334,7 +334,7 @@ export default function UserProfileScreen() {
                         <Text style={styles.lessonMeta}>
                           {lesson.contents.length} content {lesson.contents.length === 1 ? 'item' : 'items'}
                         </Text>
-                          <EnrollmentCount lessonId={lesson.id} />
+                          <EnrollmentCount count={lesson.enrollmentCount ?? 0} />
 
                         {enrollment ? (
                           <ProgressBar

@@ -64,6 +64,7 @@ export default function LessonDetailsScreen() {
     try {
       await enrollInLesson(profile, lesson);
       setEnrollment(await getEnrollment(profile.uid, lesson.id));
+      setLesson(await getLesson(lesson.id));
     } catch (enrollError) {
       setError(errorMessage(enrollError));
     } finally {
@@ -100,7 +101,7 @@ export default function LessonDetailsScreen() {
 
             <Card>
               <View style={styles.infoCard}>
-                <EnrollmentCount lessonId={lesson.id} />
+                <EnrollmentCount count={lesson.enrollmentCount ?? 0} />
                 <InfoRow icon="flag-outline" label="Career Goal" value={lesson.careerGoalName || 'Not specified'} />
                 <Pressable
                   onPress={() => router.push({ pathname: '/user/[id]', params: { id: lesson.teacherId } })}

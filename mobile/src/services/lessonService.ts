@@ -22,7 +22,7 @@ import { careerGoalByTag, type CareerGoalTag } from '@/constants/careerGoals';
 import { FILE_LIMITS } from '@/constants/config';
 import { skillByTag } from '@/constants/skills';
 import { auth, db, functions } from '@/firebase/config';
-import type { Lesson, LessonContent, LessonEnrollment, User } from '@/types';
+import type { Lesson, LessonContent, LessonEnrollment, EnrolledLesson, User } from '@/types';
 import { deleteFile, sanitizeStorageName, uploadFile } from '@/utils/storage';
 
 export type LocalPdf = {
@@ -484,14 +484,6 @@ export async function deleteLesson(teacherId: string, lessonId: string): Promise
 
 export const enrollmentIdFor = (userId: string, lessonId: string): string => userId + '_' + lessonId;
 
-/** Public counts observe only the lesson document, never learner records. */
-export function subscribeToLesson(
-  lessonId: string, onValue: (lesson: Lesson | null) => void, onError: (error: Error) => void
-): () => void {
-  return onSnapshot(doc(db, 'lessons', lessonId), (snapshot) =>
-    onValue(snapshot.exists() ? normalizeLesson({ ...snapshot.data(), id: snapshot.id }) : null), onError);
-}
-
 async function ownEnrollmentRecords(userId: string): Promise<LessonEnrollment[]> {
   // Sort locally: orderBy would silently exclude legacy rows lacking updatedAt.
   const rows = await getDocs(query(enrollmentsCol, where('userId', '==', userId)));
@@ -505,14 +497,14 @@ export async function getEnrollment(userId: string, lessonId: string): Promise<L
   return rows.find((row) => row.lessonId === lessonId) ?? null;
 }
 
-export async function listEnrollmentsByUser(userId: string): Promise<LessonEnrollment[]> {
+export async function listEnrollmentsByUser(userId: string): Promise<EnrolledLesson[]> {
   const rows = await ownEnrollmentRecords(userId);
   const unique = [...new Map(rows.slice().reverse().map((row) => [row.lessonId, row])).values()];
   const available = await Promise.all(unique.map(async (row) => {
     if (!row.lessonId || row.lessonId.includes('/')) return null;
     try {
       const lesson = await getLesson(row.lessonId);
-      return lesson && lesson.published && !lesson.deleting ? row : null;
+      return lesson && lesson.published && !lesson.deleting ? { ...row, lesson } : null;
     } catch (error) {
       // Missing/private lessons can be denied by rules rather than returned as
       // absent. Hide unavailable cards, but surface network/service failures.
@@ -520,12 +512,12 @@ export async function listEnrollmentsByUser(userId: string): Promise<LessonEnrol
       throw error;
     }
   }));
-  return available.filter((row): row is LessonEnrollment => row !== null)
+  return available.filter((row): row is EnrolledLesson => row !== null)
     .sort((a, b) => (b.updatedAt?.toMillis?.() ?? 0) - (a.updatedAt?.toMillis?.() ?? 0));
 }
 
 export async function listEnrollmentIds(userId: string): Promise<Set<string>> {
-  const enrollments = await listEnrollmentsByUser(userId);
+  const enrollments = await ownEnrollmentRecords(userId);
   return new Set(enrollments.map((enrollment) => enrollment.lessonId));
 }
 

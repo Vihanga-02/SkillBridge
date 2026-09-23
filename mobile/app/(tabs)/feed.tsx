@@ -2,7 +2,7 @@ import { EnrollmentCount } from '@/components/lesson/EnrollmentCount';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/ui/Button';
@@ -66,6 +66,7 @@ export default function FeedScreen() {
     try {
       await enrollInLesson(profile, lesson);
       setEnrolledIds((current) => new Set(current).add(lesson.id));
+      setLessons(await listLessons());
     } catch (enrollError) {
       setError(errorMessage(enrollError));
     } finally {
@@ -75,7 +76,12 @@ export default function FeedScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <FlatList
+        data={loading ? [] : filtered}
+        keyExtractor={(lesson) => lesson.id}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        ListHeaderComponent={<View style={styles.header}>
         <ScreenHeader title="Learn" subtitle="Lessons created by SkillBridge teachers." />
 
         {error ? (
@@ -100,24 +106,19 @@ export default function FeedScreen() {
           ))}
         </ScrollView>
 
-        {loading ? (
-          <LoadingState label="Loading lessons..." />
-        ) : filtered.length === 0 ? (
-          <EmptyState
-            icon="book-outline"
-            title="No lessons yet"
-            message="Teacher-created lessons for this career goal will appear here."
-          />
-        ) : (
-          <View style={styles.list}>
-            {filtered.map((lesson) => {
+        </View>}
+        ListEmptyComponent={loading ? <LoadingState label="Loading lessons..." /> : (
+          <EmptyState icon="book-outline" title="No lessons yet"
+            message="Teacher-created lessons for this career goal will appear here." />
+        )}
+        renderItem={({ item: lesson }) => {
               const isOwnLesson = lesson.teacherId === profile?.uid;
               const isEnrolled = enrolledIds.has(lesson.id);
               const canOpen = isOwnLesson || isEnrolled;
               const canEnroll = !!profile && profile.role !== 'teacher' && !isOwnLesson && !isEnrolled;
 
               return (
-                <Card key={lesson.id}>
+                <Card style={styles.listItem}>
                   <View style={styles.cardBody}>
                     <Pressable
                       onPress={() =>
@@ -139,7 +140,7 @@ export default function FeedScreen() {
                       <Text style={styles.caption}>
                         {lesson.contents.length} content {lesson.contents.length === 1 ? 'item' : 'items'}
                       </Text>
-                          <EnrollmentCount lessonId={lesson.id} />
+                          <EnrollmentCount count={lesson.enrollmentCount ?? 0} />
                       {learnerGoals.has(lesson.careerGoalId) ? (
                         <Text style={styles.match}>Your goal</Text>
                       ) : null}
@@ -161,10 +162,8 @@ export default function FeedScreen() {
                   </View>
                 </Card>
               );
-            })}
-          </View>
-        )}
-      </ScrollView>
+}}
+      />
     </SafeAreaView>
   );
 }
@@ -186,10 +185,8 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingHorizontal: spacing.lg,
   },
-  list: {
-    gap: spacing.md,
-    paddingHorizontal: spacing.lg,
-  },
+  header: { gap: spacing.lg },
+  listItem: { marginHorizontal: spacing.lg },
   pressed: {
     opacity: 0.8,
   },

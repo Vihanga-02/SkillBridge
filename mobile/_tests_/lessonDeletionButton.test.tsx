@@ -1,31 +1,17 @@
-jest.mock('@/hooks/useLessonEnrollmentCount', () => ({ useLessonEnrollmentCount: jest.fn() }));
 jest.mock('@/components/ui/Button', () => ({ Button: 'Button' }));
 import { DeleteLessonButton } from '@/components/lesson/DeleteLessonButton';
-import { useLessonEnrollmentCount } from '@/hooks/useLessonEnrollmentCount';
-
-function buttonProps(retry: boolean, loading = false) {
-  const view = DeleteLessonButton({ lessonId: 'lesson', onPress: jest.fn(), loading, retry });
-  return view.props.children[0].props;
+function buttonProps(count: number | undefined, retry = false, loading = false) {
+  return DeleteLessonButton({ count, onPress: jest.fn(), loading, retry }).props.children[0].props;
 }
-
-it.each([
-  { count: 0, error: false },
-  { count: null, error: true },
-  { count: 9, error: false },
-])('offers server-validated retry after a failure or stale marker: %j', (state) => {
-  (useLessonEnrollmentCount as jest.Mock).mockReturnValue(state);
-  expect(buttonProps(true)).toMatchObject({ label: 'Retry Delete', disabled: false, loading: false });
+it.each([0, 9])('allows a server-validated retry with displayed count %i', (count) => {
+  expect(buttonProps(count, true)).toMatchObject({ label: 'Retry Delete', disabled: false });
 });
-
-it('keeps ordinary deletion disabled for enrolled lessons and unavailable counts', () => {
-  for (const state of [{ count: 1, error: false }, { count: null, error: true }]) {
-    (useLessonEnrollmentCount as jest.Mock).mockReturnValue(state);
-    expect(buttonProps(false).disabled).toBe(true);
-  }
+it('uses loaded counts and the legacy zero fallback for the convenience guard', () => {
+  expect(buttonProps(1).disabled).toBe(true);
+  expect(buttonProps(0).disabled).toBe(false);
+  expect(buttonProps(undefined).disabled).toBe(false);
 });
-
-it('uses the shared Button busy state only while the current request is running', () => {
-  (useLessonEnrollmentCount as jest.Mock).mockReturnValue({ count: 0, error: false });
-  expect(buttonProps(true, true)).toMatchObject({ label: 'Deleting...', loading: true });
-  expect(buttonProps(true, false)).toMatchObject({ label: 'Retry Delete', loading: false, disabled: false });
+it('clears the busy state so a failed attempt can be retried', () => {
+  expect(buttonProps(0, true, true)).toMatchObject({ label: 'Deleting...', loading: true });
+  expect(buttonProps(0, true)).toMatchObject({ label: 'Retry Delete', loading: false, disabled: false });
 });

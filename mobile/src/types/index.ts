@@ -398,3 +398,6 @@ export type AiUsage = {
   count: number;
   lastPromptType: string;
 };
+
+/** Loaded lesson joined to the learner?s private enrollment; never persisted. */
+export type EnrolledLesson = LessonEnrollment & { lesson: Lesson };

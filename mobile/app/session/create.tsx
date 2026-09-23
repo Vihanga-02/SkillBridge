@@ -1,5 +1,5 @@
-import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useEffect, useMemo, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -20,7 +20,7 @@ import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { LEVELS, LEVEL_LABELS, skillLabel, type Level, type SkillTag } from '@/constants/skills';
 import { colors, spacing, type } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
-import { createSession } from '@/services/sessionService';
+import { createSession, getEditableSession, updateSession } from '@/services/sessionService';
 import type { SessionMode, SessionType } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
 
@@ -50,7 +50,9 @@ function todayIso(): string {
 }
 
 export default function CreateSessionScreen() {
+  const { id } = useLocalSearchParams<{ id?: string }>();
   const { profile } = useAuth();
+  const editing = typeof id === 'string' && id.length > 0;
 
   const offeredSkills = useMemo(
     () =>
@@ -76,9 +78,58 @@ export default function CreateSessionScreen() {
   const [duration, setDuration] = useState('60');
   const [capacity, setCapacity] = useState('10');
   const [saving, setSaving] = useState(false);
+  const [loadingSession, setLoadingSession] = useState(editing);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!skillTag && offeredSkills[0]) setSkillTag(offeredSkills[0].value);
+  }, [offeredSkills, skillTag]);
+
+  useEffect(() => {
+    if (!editing || !id || !profile) return;
+    let active = true;
+    setLoadingSession(true);
+    setError(null);
+    void getEditableSession(id)
+      .then((session) => {
+        if (!active) return;
+        if (!session) throw new Error('This session could not be found.');
+        if (session.teacherId !== profile.uid) {
+          throw new Error('Only the teacher who created this session can edit it.');
+        }
+        if ((session.bookingCount ?? 0) > 0 || session.seatsTaken > 0) {
+          throw new Error('This session cannot be edited after a learner has booked it.');
+        }
+        const start = session.startAt.toDate();
+        setTitle(session.title);
+        setDescription(session.description);
+        setSkillTag(session.skillTag);
+        setLevel(session.level);
+        setSessionType(session.type);
+        setMode(session.mode);
+        setMeetingLink(session.meetingLink);
+        setLocationText(session.locationText);
+        setDate(
+          `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`
+        );
+        setTime(`${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`);
+        setDuration(String(session.durationMins));
+        setCapacity(String(session.capacity));
+      })
+      .catch((loadError) => {
+        if (active) setError(errorMessage(loadError));
+      })
+      .finally(() => {
+        if (active) setLoadingSession(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [editing, id, profile]);
+
   if (!profile) return <LoadingState fullScreen label="Loading your profile…" />;
+
+  if (loadingSession) return <LoadingState fullScreen label="Loading session..." />;
 
   if (profile.role === 'learner') {
     return (
@@ -118,7 +169,7 @@ export default function CreateSessionScreen() {
     setSaving(true);
     setError(null);
     try {
-      const sessionId = await createSession(profile, {
+      const input = {
         title,
         description,
         skillTag,
@@ -131,7 +182,9 @@ export default function CreateSessionScreen() {
         time,
         durationMins: Number(duration),
         capacity: Number(capacity) || 1,
-      });
+      };
+      const sessionId = editing && id ? id : await createSession(profile, input);
+      if (editing && id) await updateSession(profile, id, input);
       router.replace({ pathname: '/session/[id]', params: { id: sessionId } });
     } catch (saveError) {
       setError(errorMessage(saveError));
@@ -142,7 +195,11 @@ export default function CreateSessionScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScreenHeader title="Create session" subtitle="Offer time for peers to book." showBack />
+      <ScreenHeader
+        title={editing ? 'Edit session' : 'Create session'}
+        subtitle={editing ? 'Update this session before anyone books it.' : 'Offer time for peers to book.'}
+        showBack
+      />
 
       <KeyboardAvoidingView
         style={styles.flex}
@@ -246,7 +303,11 @@ export default function CreateSessionScreen() {
             <Text style={styles.helper}>One-to-one sessions always have 1 seat.</Text>
           )}
 
-          <Button label="Publish session" onPress={() => void onSubmit()} loading={saving} />
+          <Button
+            label={editing ? 'Save changes' : 'Publish session'}
+            onPress={() => void onSubmit()}
+            loading={saving}
+          />
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

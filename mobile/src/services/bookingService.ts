@@ -124,6 +124,7 @@ export async function requestBooking(
 
     tx.update(sessionRef, {
       seatsTaken: nextTaken,
+      bookingCount: increment(1),
       status: nextTaken >= live.capacity ? 'full' : 'open',
       updatedAt: serverTimestamp(),
     });

@@ -19,6 +19,9 @@ type Props = {
   counterpart: string;
   counterpartAvatarUrl?: string;
   onPress: () => void;
+  onAccept?: () => void;
+  onDecline?: () => void;
+  actionLoading?: boolean;
 };
 
 export function BookingCard({
@@ -26,6 +29,9 @@ export function BookingCard({
   counterpart,
   counterpartAvatarUrl,
   onPress,
+  onAccept,
+  onDecline,
+  actionLoading = false,
 }: Props) {
   return (
     <Card accessibilityLabel={`Open ${booking.sessionTitle} booking`}>
@@ -63,6 +69,26 @@ export function BookingCard({
       </View>
 
       <Button label="View details" variant="secondary" onPress={onPress} style={styles.cta} />
+
+      {onAccept && onDecline ? (
+        <View style={styles.actions}>
+          <Button
+            label="Accept"
+            icon="checkmark-circle-outline"
+            loading={actionLoading}
+            onPress={onAccept}
+            style={styles.actionButton}
+          />
+          <Button
+            label="Decline"
+            icon="close-circle-outline"
+            variant="danger"
+            loading={actionLoading}
+            onPress={onDecline}
+            style={styles.actionButton}
+          />
+        </View>
+      ) : null}
     </Card>
   );
 }
@@ -103,4 +129,6 @@ const styles = StyleSheet.create({
   personRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },
   counterpart: { ...type.label, color: colors.ink, flex: 1 },
   cta: { marginTop: spacing.md },
+  actions: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.sm },
+  actionButton: { flex: 1 },
 });

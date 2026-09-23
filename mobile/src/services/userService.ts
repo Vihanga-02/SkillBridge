@@ -36,7 +36,15 @@ import { FILE_LIMITS, PAGE_SIZE } from '@/constants/config';
 import { skillLabel, skillsInCategory, type Category } from '@/constants/skills';
 import { auth, db } from '@/firebase/config';
 import { nextCursor, type PageCursor } from '@/services/pagination';
-import type { CareerGoal, Level, SkillOffered, SkillTag, SkillWanted, TestQuestion, User } from '@/types';
+import type {
+  CareerGoal,
+  Level,
+  SkillOffered,
+  SkillTag,
+  SkillWanted,
+  TestQuestion,
+  User,
+} from '@/types';
 import { uploadFile } from '@/utils/storage';
 
 const usersRef = collection(db, 'users');
@@ -402,8 +410,7 @@ export async function saveTestAttempt(
   questions: TestQuestion[],
   answers: string[],
   score: number,
-  passed: boolean,
-  source: 'gemini' | 'fallback'
+  passed: boolean
 ): Promise<string> {
   const created = await addDoc(collection(db, 'skillTests'), {
     userId: uid,
@@ -412,7 +419,7 @@ export async function saveTestAttempt(
     answers,
     score,
     passed,
-    source,
+    source: 'hardcoded',
     createdAt: serverTimestamp(),
   });
 

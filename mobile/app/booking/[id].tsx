@@ -24,6 +24,7 @@ import {
   declineBooking,
   getBooking,
   markCompleted,
+  SESSION_COMPLETION_CREDITS,
 } from '@/services/bookingService';
 import type { Booking } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
@@ -73,12 +74,16 @@ export default function BookingDetailScreen() {
   const isTeacher = !!profile && !!booking && profile.uid === booking.teacherId;
   const isLearner = !!profile && !!booking && profile.uid === booking.learnerId;
 
-  async function runAction(action: () => Promise<void>, successMessage: string) {
+  async function runAction(
+    action: () => Promise<void>,
+    successMessage: string,
+    successDetail?: string
+  ) {
     setActing(true);
     setError(null);
     try {
       await action();
-      Alert.alert(successMessage);
+      Alert.alert(successMessage, successDetail);
       await load();
     } catch (actionError) {
       setError(errorMessage(actionError));
@@ -226,7 +231,8 @@ export default function BookingDetailScreen() {
               onPress={() =>
                 void runAction(
                   () => markCompleted(booking.id, profile!.uid),
-                  'Booking completed'
+                  'Booking completed',
+                  `+${SESSION_COMPLETION_CREDITS} Skill Credits earned`
                 )
               }
             />

@@ -1,4 +1,4 @@
-# SkillBridge — Implementation Plan v2.4 (Plan + Implementation Tracker)
+# SkillBridge — Implementation Plan v2.5 (Plan + Implementation Tracker)
 **SDG 4 & 8 — Community Skill-Exchange & Micro-Learning Mobile App**
 
 Stack: React Native (Expo, TypeScript, Expo Router) · Firebase (Auth + Firestore + Storage) · optional later Cloud Functions + Gemini API
@@ -55,6 +55,14 @@ This version merges the three feature lists your group members suggested into th
 | **Latest merged-development audit** | Updates the tracker after the profile-completeness, sessions/bookings and community/reputation branches were merged into `main`. |
 | **Production access controls deferred** | Detailed Firestore/Storage access-control work is no longer part of the active campus-project scope. It can be added later if deployment requirements change. |
 
+### Added in v2.5
+
+| Addition | Why |
+|---|---|
+| **Complete offline skill-verification bank** | All 32 shared-catalog skills now have 15 deterministic beginner-competency MCQs. No Gemini call, API key, quota, cache or network connection is required. |
+| **Level-sized verification tests** | A teacher's declared offered-skill level selects 5 questions for Beginner, 10 for Intermediate and all 15 for Advanced. |
+| **Verification access guards and coverage tests** | Only `teacher` / `both` accounts can test skills they actually offer; automated tests enforce catalog coverage, bank size, valid options and level counts. |
+
 ---
 
 ## Implementation Status — audited 23 September 2026
@@ -65,13 +73,13 @@ This section is the current source of truth for progress. Sections 1–21 below 
 
 ### Audit basis and current health
 
-The audit inspected merged `main` commit `8e26afb`, including `mobile/app`, `mobile/src`, dependencies, tests and repository configuration. It did not assume that Firebase console configuration or a deployed APK exists unless a corresponding tracked file or artefact proves it.
+The audit inspected the current development branch based on merged `main` commit `8e26afb`, including the v2.5 offline skill-verification implementation, `mobile/app`, `mobile/src`, dependencies, tests and repository configuration. It did not assume that Firebase console configuration or a deployed APK exists unless a corresponding tracked file or artefact proves it.
 
 | Check | Result | Notes |
 |---|---|---|
 | TypeScript | ✅ | `npm run typecheck` passes. |
 | ESLint | ✅ | `npm run lint` passes with no reported warnings or errors. |
-| Automated tests | 🟡 | 4 suites / 14 tests pass (register, login, deterministic chat ID and profile-completeness rules), including a clean `--detectOpenHandles` run. Coverage is still small for the implemented surface. |
+| Automated tests | 🟡 | 5 suites / 20 tests pass (register, login, deterministic chat ID, profile completeness and complete skill-test-bank rules). Coverage is still small for the implemented surface. |
 | Source structure | ✅ | 34 route files, 10 service files and the shared theme/types/catalogues are present. |
 | Manual UI report | 🟡 | `SCRUM-43_Manual_UI_Test_Report.pdf` exists, but this code audit did not validate its test cases against the current commit. |
 | Local Firebase config | ✅ | `.env.example`, Firebase client initialization and persistent React Native auth are present; `.env` is ignored. |
@@ -82,11 +90,11 @@ The audit inspected merged `main` commit `8e26afb`, including `mobile/app`, `mob
 | Component | Status | Implemented now | Main remaining work |
 |---|---|---|---|
 | **0. Auth & app shell** | ✅ | Register, login, reset password, persistent login, live profile context, protected routing, role-aware onboarding, logout and an extra change-password screen. | Add broader integration tests and verify persistence/deep links on a release build. |
-| **1. Profile, portfolio & discovery** | 🟡 Near complete | Discovery search/filter/pagination, role and career-goal browsing, public/own profile, profile editing, avatar, skills, career goals, credentials CRUD/viewer, fallback skill tests, profile completeness, public reviews, badges display, lesson cards, Book and Message CTAs. | Add offered sessions inline; add Gemini-generated/cached tests and related-skill suggestions only after core work. |
+| **1. Profile, portfolio & discovery** | 🟡 Near complete | Discovery search/filter/pagination, role and career-goal browsing, public/own profile, profile editing, avatar, skills, career goals, credentials CRUD/viewer, offline tests for all 32 skills with level-sized question sets, profile completeness, public reviews, badges display, lesson cards, Book and Message CTAs. | Add offered sessions inline; consider related-skill suggestions only after core work. |
 | **2. Micro-learning** | 🟡 Core flow works | Teacher lesson CRUD, multiple YouTube/PDF items, enrolment, lesson details/viewer, per-item completion, percentage progress, authored/enrolled lesson list and completion counters. | Add text/notes, flashcards, quizzes, practice content, progress dashboard/streak, full feed filters/pagination/refresh and AI generators. |
 | **3. Peer sessions** | 🟡 Strong core | Session create/edit/delete-before-booking, browse/detail, teaching requests/schedule/history, calendar, transactional booking, approve/decline/cancel/complete lifecycle, participant messaging, review hand-off, profile stats and teacher credit awards. | Add booked-session cancellation flow, live session subscription, mode/date filters, attendee display, credential deep-link and missing service APIs/tests. |
 | **4. Community & reputation** | 🟡 Core flow works | Feed/Chats tabs, real-time chat inbox/thread/read state, participant profile links, text posts with filters/pagination, likes/comments/deletion, review tags/list, learner review transaction and live ratings. | Add teacher-to-learner reviews or formally remove them, moderation, achievement auto-posts and optional images. |
-| **Backend, AI & release** | 🟡 Client backend works | Firebase client SDK, service validations, transactions and pagination are implemented. | Create required composite indexes, Gemini proxy/quota layer, seed data, EAS profiles and APK smoke tests. Production access-control hardening is deferred. |
+| **Backend, AI & release** | 🟡 Client backend works | Firebase client SDK, service validations, transactions and pagination are implemented. Skill verification is intentionally offline and does not require AI infrastructure. | Create required composite indexes, optional Gemini proxy/quota support for non-verification features, seed data, EAS profiles and APK smoke tests. Production access-control hardening is deferred. |
 
 ### Detailed tracker — Component 0 and shared foundation
 
@@ -110,12 +118,14 @@ The audit inspected merged `main` commit `8e26afb`, including `mobile/app`, `mob
 - [x] Avatar upload
 - [x] Credential add/edit/delete, public/private visibility, recount, file cleanup and viewer
 - [x] Credential image zoom, PDF open and external verification link
-- [x] Hardcoded skill-test bank, attempt recording and verified-skill update
+- [x] Offline verification bank for all 32 catalog skills: 15 deterministic MCQs per skill
+- [x] Level-sized tests: Beginner 5, Intermediate 10 and Advanced 15 questions
+- [x] Teacher/`both` role and offered-skill guards, attempt recording and verified-skill update
+- [x] Automated bank tests for catalog coverage, question counts, unique options and valid answers
 - [x] Lessons by a user, lesson enrolment/continue actions, Book and Message CTAs
 - [x] Role-aware profile-completeness checklist and next-action CTA in Me (client-derived; no schema change)
 - [x] Paginated public reviews with ratings and quick feedback tags
 - [ ] Render **sessions offered by this user** inline on the public profile
-- [ ] Add Gemini generation/cache for skills outside the fallback bank
 - [ ] Add related-skill suggestions only after P0/P1 core scope is complete
 
 ### Detailed tracker — Component 2
@@ -197,7 +207,7 @@ The audit inspected merged `main` commit `8e26afb`, including `mobile/app`, `mob
 | **P1 — community completion** | Achievement auto-post integration and final decision on teacher-to-learner reviews | Advertised reputation/community behavior matches the implemented UI and report. |
 | **P1 — Firestore queries** | Create the composite indexes required by public reviews, filtered posts and ordered lists | All production queries work without temporary client-side fallbacks. |
 | **P1 — confidence** | Service, transaction and component tests | Critical concurrency cases run automatically, including two learners competing for the last seat. |
-| **P2 — AI** | Gemini proxy, quota/cache, generated tests/quizzes/flashcards, session drafting and moderation | No key ships in the app; offline/manual fallbacks remain usable. |
+| **P2 — optional AI** | Gemini proxy and quota support for editable lesson quiz/flashcard drafts, session drafting and moderation; skill verification stays hardcoded | No key ships in the app; every non-verification feature remains usable without AI. |
 | **P2 — stretch** | Notifications and the remaining leaderboard UI (teacher credit awards are already implemented) | Attempt only when every P0 and P1 acceptance journey is stable. |
 
 ### Small completeness improvements not in the remaining plan
@@ -472,7 +482,7 @@ user + onboardingComplete  → redirect to /(tabs)/discovery
 | `app/profile/credentials/index.tsx` | **My Credentials** — the teacher's own manage list, grouped by skill. Add / edit / delete, visibility toggle, recount action. Only reachable when `role` is `teacher` or `both`. |
 | `app/profile/credentials/add.tsx` | Add or edit one credential: type, title, issuer, the skill it backs, dates, reference number, verification URL, file upload. |
 | `app/credential/[id].tsx` | **Credential viewer** — full screen. Images pinch-to-zoom; PDFs open in `WebBrowser`. Shows issuer, dates, reference number, and an "Open verification link" button when one was supplied. This is the screen learners land on. |
-| `app/profile/skill-test/[skill].tsx` | Skill Verification Test: 3–5 questions for that skill, submit answers, get pass/fail, on pass adds the skill to `verifiedSkills`. Questions generated by Gemini (§11) with a hardcoded fallback bank for the top 8 skills so the demo never depends on the network. |
+| `app/profile/skill-test/[skill].tsx` | Offline Skill Verification Test for `teacher` / `both` accounts. The skill must be in `skillsOffered`; its declared level selects 5 Beginner, 10 Intermediate or 15 Advanced questions from a 15-question local bank. Submit answers, get pass/fail, and on pass add the skill to `verifiedSkills`. No Gemini call is used. |
 | `app/(tabs)/me.tsx` *(optional 5th tab)* | Own profile shortcut + Logout + links to My Bookings / My Lessons / My Credentials. Can also live as a header avatar button. |
 
 #### `src/services/userService.ts`
@@ -530,7 +540,7 @@ Both are updated in the same `updateDoc` call. Every other component queries the
 
 | Signal | Where it comes from | What it actually means |
 |---|---|---|
-| **Verified skill badge** (`verifiedSkills`) | The user passed SkillBridge's own AI-generated skill test | *The app tested them.* |
+| **Verified skill badge** (`verifiedSkills`) | The user passed SkillBridge's own offline, hardcoded skill test | *The app tested them.* |
 | **Credential** (this feature) | The teacher uploaded a document and typed its details | *They claim it and supplied evidence — the learner judges it.* |
 
 Render them differently: a filled ✔ badge for the app-verified one, an outlined document chip for a credential. Label credentials **"Self-declared"** in the viewer. There is no admin panel in scope to approve them, so the app must never imply it verified something it didn't. State this in the report; admin or peer verification is named as future work.
@@ -602,7 +612,7 @@ Tapping a row opens `credential/[id]`. Skills with zero credentials still appear
 
 #### Optional AI hook
 
-Gemini 2.5 Flash accepts images. A "Scan certificate" action could send the photo and get back `{ title, issuer, issueDate }` as JSON to pre-fill the form. Genuinely nice, but it means pushing image bytes through the Cloud Function — so it's listed as feature #7 in §11.3 and should only be attempted after the six text-only AI features work.
+Gemini 2.5 Flash accepts images. A "Scan certificate" action could send the photo and get back `{ title, issuer, issueDate }` as JSON to pre-fill the form. Genuinely nice, but it means pushing image bytes through the Cloud Function — so it remains optional and should only be attempted after the core non-AI journey and any higher-priority AI drafts work.
 
 ---
 
@@ -1075,11 +1085,11 @@ A **subcollection**, not an array on the user doc — see §5.1.1 for why. Writt
 |---|---|---|
 | `userId` | string | |
 | `skillTag` | string | |
-| `questions` | `{ q, type, options?, answer }[]` | as generated/served |
+| `questions` | `{ q, type, options?, answer }[]` | locally served subset for the offered-skill level |
 | `answers` | string[] | what the user submitted |
 | `score` | number | 0–100 |
 | `passed` | boolean | `score >= 60` |
-| `source` | `'gemini' \| 'fallback'` | shows the AI actually ran |
+| `source` | `'hardcoded'` | current implementation; legacy documents may still contain `'fallback'` or `'gemini'` |
 | `createdAt` | T | |
 
 ### `lessons/{lessonId}` — owner: Member 2
@@ -1354,26 +1364,27 @@ firebase deploy --only functions
 }
 ```
 
-### 11.3 The AI features — one function, six prompt templates (plus two optional)
+### 11.3 Optional AI features — skill verification is explicitly excluded
+
+The Member 1 skill-verification test is now deliberately offline: 15 reviewed local questions exist for every catalog skill, and 5/10/15 are served by declared level. Do not add Gemini generation, caching or quota use back into that flow. It adds cost and failure modes without improving this campus-project assessment.
 
 | # | Component | Feature | Prompt (abbreviated) | UI |
 |---|---|---|---|---|
-| 1 | **M1** | **Skill Verification Test** | "Generate 4 multiple-choice questions testing basic competency in {skill}, difficulty {level}. Return JSON." | `profile/skill-test/[skill].tsx` — pass ≥ 60% → `verifiedSkills` badge appears on the profile |
-| 2 | **M1** | **Related-skill suggestions** | "A user can teach {skills}. Suggest 5 related skills they might also teach, from this list: {SKILLS}. Return JSON array of tags." | Chips under the skill editor: "You might also teach…" |
-| 3 | **M2** | **Quiz generator from lesson text** | "From this lesson content, write 5 MCQs with 4 options each. Content: {content}. Return JSON." | "✨ Generate quiz" button on `lesson/create` — teacher can edit before saving |
-| 4 | **M2** | **Flashcard generator** | "Convert these notes into up to 12 flashcards as `{front, back}` pairs. Notes: {notes}. Return JSON." | "✨ Generate flashcards" on `lesson/create` |
-| 5 | **M3** | **Session description drafter** | "Write a friendly 60-word session description and 4 bullet-point agenda for a {duration}-min {level} session on {skill}. Return JSON `{description, agenda[]}`." | "✨ Draft with AI" on `session/create` |
-| 6 | **M4** | **Content moderation** | "Does this message contain harassment, hate speech, or spam? Reply only `SAFE` or `UNSAFE`. Message: {text}" | Runs before saving a post or chat message; `UNSAFE` → block + show a warning, save `moderation: 'flagged'` |
-| 7 | **M1** *(optional, do last)* | **Certificate scanner** | Send the uploaded credential image and ask: "Extract the certificate title, issuing organisation and issue date. Return JSON `{title, issuer, issueDate}`." | "✨ Scan certificate" on `credentials/add` — pre-fills the form, user edits before saving. Needs image bytes through the Cloud Function, so it's more work than the six above — build it only once they all work. |
+| 1 | **M1** | **Related-skill suggestions** | "A user can teach {skills}. Suggest 5 related skills they might also teach, from this list: {SKILLS}. Return JSON array of tags." | Chips under the skill editor: "You might also teach…" |
+| 2 | **M2** | **Quiz generator from lesson text** | "From this lesson content, write 5 MCQs with 4 options each. Content: {content}. Return JSON." | "✨ Generate quiz" button on `lesson/create` — teacher can edit before saving |
+| 3 | **M2** | **Flashcard generator** | "Convert these notes into up to 12 flashcards as `{front, back}` pairs. Notes: {notes}. Return JSON." | "✨ Generate flashcards" on `lesson/create` |
+| 4 | **M3** | **Session description drafter** | "Write a friendly 60-word session description and 4 bullet-point agenda for a {duration}-min {level} session on {skill}. Return JSON `{description, agenda[]}`." | "✨ Draft with AI" on `session/create` |
+| 5 | **M4** | **Content moderation** | "Does this message contain harassment, hate speech, or spam? Reply only `SAFE` or `UNSAFE`. Message: {text}" | Runs before saving a post or chat message; `UNSAFE` → block + show a warning, save `moderation: 'flagged'` |
+| 6 | **M1** *(optional, do last)* | **Certificate scanner** | Send the uploaded credential image and ask: "Extract the certificate title, issuing organisation and issue date. Return JSON `{title, issuer, issueDate}`." | "✨ Scan certificate" on `credentials/add` — pre-fills the form, user edits before saving. Needs image bytes through the Cloud Function, so build it only after the core flow is stable. |
 | ⭐ | **Cross-cutting** | **AI Learning Assistant** | System prompt: "You are SkillBridge's learning assistant. Help with study questions concisely. If asked something unrelated to learning, politely redirect." | New route `app/assistant.tsx` — `GiftedChat` UI (M4's library, reused), reachable from a floating action button on the feed |
 
-**Every one of these must have a fallback.** Wrap each call in try/catch: on failure, hide the AI button or fall back to a hardcoded question bank / manual entry. Your demo must work with the Wi-Fi off — an AI feature that crashes the app on stage costs more marks than not having it.
+**Every optional AI feature must have a fallback.** Wrap each call in try/catch: on failure, hide the AI button or use manual entry. Your demo must work with the Wi-Fi off — an AI feature that crashes the app on stage costs more marks than not having it.
 
 Also: show a spinner with a real label ("Generating your quiz…"), and always let the user **edit** the AI output before saving. AI-as-a-draft, never AI-as-final — that's a genuine UX argument you can defend in the viva.
 
 ### 11.4 Cost & quota control
 - Cap each user at ~20 AI calls/day via `aiUsage/{uid}`.
-- Cache generated skill tests: check `skillTests` for an existing question set for that skill before calling Gemini again.
+- Skill-verification tests never call Gemini and therefore consume no AI quota.
 - Truncate `content` to ~4000 characters before sending.
 - Disable the assistant chat's history beyond the last 6 messages.
 
@@ -1780,7 +1791,8 @@ skillbridge/
     │   │   ├── theme.ts                    [S]  §13 — colours, spacing, radius, type, shadow
     │   │   ├── skills.ts                   [S]  §6.1 — THE shared skill taxonomy
     │   │   ├── careerGoals.ts              [S]  §6.2 / §5.1.2 — career goal catalog + helpers
-    │   │   ├── skillTestBank.ts            [M1] offline fallback questions for skill tests
+    │   │   ├── skillTestBank.ts            [M1] deterministic MCQ builder + 5/10/15 level selection
+    │   │   ├── skillQuizData/              [M1] 15 reviewed offline concepts for every catalog skill
     │   │   └── config.ts                   [S]  file size caps, page sizes, AI daily quota
     │   │
     │   ├── types/
@@ -1855,7 +1867,7 @@ so a mistyped tag becomes a *compile* error instead of a query that silently ret
 | **4** | Re-test the full real-data journey and fix integration failures. | Avatar upload + search/filters (All / Teachers / Learners) | Media upload + flashcards | `requestBooking` transaction + calendar | Reviews + rating transaction |
 | **5** | Create all composite indexes. Freeze new features. | **Credentials (§5.1.1)** + **Career goals (§5.1.2)** polish + skill test screen | Quiz runner + progress dashboard | Approve/decline/complete flow | Community feed + posts |
 | **6** | **Integration week** — wire all 18 touch points in §6. Full journey end-to-end. **Theme audit: grep every screen file for a raw `#` hex value and remove it.** | | | | |
-| **7** | AI features (§11) + **usability testing with 5 outside users** + regression testing | Feature 1 & 2 (7 only if time) | Feature 3 & 4 | Feature 5 | Feature 6 + assistant |
+| **7** | Optional AI features (§11) + **usability testing with 5 outside users** + regression testing | Feature 1 (6 only if time; skill verification remains offline) | Feature 2 & 3 | Feature 4 | Feature 5 + assistant |
 | **8** | Polish, seed demo data, build APK, write report, rehearse the demo twice | | | | |
 
 **Weeks 6–8 are non-negotiable.** Every group underestimates integration. If you're behind in Week 5, cut features (session covers, chat images, post images, video upload) — never cut integration week.

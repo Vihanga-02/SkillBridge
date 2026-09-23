@@ -1,9 +1,0 @@
-{
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "reconcile": "node reconcile-enrollments.mjs",
-    "test": "node --test reconcile-enrollments.test.mjs"
-  },
-  "dependencies": { "firebase-admin": "^13.0.0" }
-}

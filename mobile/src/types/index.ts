@@ -72,7 +72,7 @@ export type User = {
   /** derived union of `careerGoals[].skillTags` + `extraSkillsWanted` — read-only from the UI's perspective, kept for M2/M3 (§13) */
   skillsWanted: SkillWanted[];
   skillTagsWanted: SkillTag[];
-  /** tags passed via the AI skill test — *the app tested them* */
+  /** tags passed via the offline skill test — *the app tested them* */
   verifiedSkills: SkillTag[];
   /** denormalized size of the `credentials` subcollection */
   credentialCount: number;
@@ -134,6 +134,9 @@ export type TestQuestion = {
   answer: string;
 };
 
+/** `fallback` and `gemini` are retained only for reading older attempt documents. */
+export type SkillTestSource = 'hardcoded' | 'fallback' | 'gemini';
+
 /** `skillTests/{testId}` — owner: Member 1. */
 export type SkillTest = {
   id: string;
@@ -143,7 +146,7 @@ export type SkillTest = {
   answers: string[];
   score: number;
   passed: boolean;
-  source: 'gemini' | 'fallback';
+  source: SkillTestSource;
   createdAt: Timestamp | null;
 };
 

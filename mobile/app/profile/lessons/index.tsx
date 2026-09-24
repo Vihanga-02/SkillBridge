@@ -197,7 +197,6 @@ export default function MyLessonsScreen() {
                             />
                             <DeleteLessonButton
                               count={lesson.enrollmentCount}
-                             
                               deleting={lesson.deleting}
                               loading={deletingId === lesson.id}
                               onPress={() => confirmDelete(lesson)}

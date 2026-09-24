@@ -131,13 +131,14 @@ function normalizeLesson(data: Record<string, unknown>): Lesson {
   const title = String(data.lessonName ?? data.title ?? '');
   const teacherId = String(data.teacherId ?? data.ownerId ?? '');
   const careerGoalId = String(data.careerGoalId ?? data.careerGoal ?? data.goal ?? '') as CareerGoalTag;
+  const hasVerifiedEnrollmentCount = data.enrollmentCountVersion === 1 &&
+    typeof data.enrollmentCount === 'number' &&
+    Number.isSafeInteger(data.enrollmentCount) && data.enrollmentCount >= 0;
   return {
     ...data,
     id: String(data.id),
     teacherId,
-    enrollmentCount: typeof data.enrollmentCount === 'number' &&
-      Number.isSafeInteger(data.enrollmentCount) && data.enrollmentCount >= 0
-      ? data.enrollmentCount : 0,
+    enrollmentCount: hasVerifiedEnrollmentCount ? data.enrollmentCount as number : undefined,
     teacherName: String(data.teacherName ?? data.ownerName ?? ''),
     teacherAvatarUrl: String(data.teacherAvatarUrl ?? data.ownerAvatarUrl ?? ''),
     lessonName: title,
@@ -585,8 +586,10 @@ export async function deleteLesson(teacherId: string, lessonId: string): Promise
 
 export const enrollmentIdFor = (userId: string, lessonId: string): string => `${userId}_${lessonId}`;
 
-function requireEnrollmentAggregate(_data: DocumentData): void {
-  // Safe no-op: normalizeLesson defaults missing counts to 0
+function requireEnrollmentAggregate(data: DocumentData): void {
+  if (data.enrollmentCountVersion !== 1 || !Number.isSafeInteger(data.enrollmentCount) || data.enrollmentCount < 0) {
+    throw new Error('Enrollment data is being upgraded. Please try again later.');
+  }
 }
 
 /** Fetch normal lesson metadata in batches, never learner records for counts. */

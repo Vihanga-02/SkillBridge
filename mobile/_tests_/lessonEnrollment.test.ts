@@ -184,13 +184,14 @@ it('never unlocks interrupted cleanup on retry preparation failure', async () =>
   await expect(deleteLesson('teacher', 'lesson')).rejects.toThrow('offline');
   expect(records.get('lessons/lesson')?.deleting).toBe(true);
 });
-it('lessons missing enrollmentCount safely default to 0 and allow enrollment', async () => {
+it('blocks enrollment until a legacy lesson count has been backfilled', async () => {
   const data = { ...records.get('lessons/lesson') };
   delete data.enrollmentCount; delete data.enrollmentCountVersion;
   put('lessons/lesson', data);
-  expect((await getLesson('lesson'))?.enrollmentCount).toBe(0);
-  await enrollInLesson(learner(), lesson);
-  expect(records.get('lessons/lesson')?.enrollmentCount).toBe(1);
+  expect((await getLesson('lesson'))?.enrollmentCount).toBeUndefined();
+  await expect(enrollInLesson(learner(), lesson)).rejects.toThrow('being upgraded');
+  await expect(deleteLesson('teacher', 'lesson')).rejects.toThrow('being upgraded');
+  expect(records.get('lessons/lesson')).toMatchObject({ published: true, deleting: false });
 });
 it('rejects nonowners, learner-only deletion and impersonated creator', async () => {
   await expect(deleteLesson('other', 'lesson')).rejects.toThrow('Sign in');
@@ -259,11 +260,10 @@ it('two students plus the BOTH creator produce one canonical count across every 
   await expect(deleteLesson('teacher', 'lesson')).rejects.toThrow('learners are currently enrolled');
 });
 
-it('a numeric aggregate does not depend on an extra migration version marker', async () => {
+it('does not trust a numeric aggregate without the migration version marker', async () => {
   const data = { ...records.get('lessons/lesson') };
   delete data.enrollmentCountVersion;
   put('lessons/lesson', data);
-  await enrollInLesson(learner(), lesson);
-  expect(records.get('lessons/lesson')?.enrollmentCount).toBe(1);
-  await expect(deleteLesson('teacher', 'lesson')).rejects.toThrow('learners are currently enrolled');
+  expect((await getLesson('lesson'))?.enrollmentCount).toBeUndefined();
+  await expect(enrollInLesson(learner(), lesson)).rejects.toThrow('being upgraded');
 });

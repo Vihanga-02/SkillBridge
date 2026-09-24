@@ -3,12 +3,18 @@ import { EnrollmentCount } from '@/components/lesson/EnrollmentCount';
 import { DeleteLessonButton } from '@/components/lesson/DeleteLessonButton';
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 
-it.each([[undefined, '0 enrolled'], [0, '0 enrolled'], [1, '1 learner enrolled'], [5, '5 learners enrolled']])(
+it.each([[undefined, 'Enrollment count unavailable'], [0, '0 enrolled'], [1, '1 learner enrolled'], [5, '5 learners enrolled']])(
   'renders aggregate %s without loading learner records', async (count, text) => {
     const screen = await render(<EnrollmentCount count={count as number | undefined} />);
     expect(screen.getByText(text as string)).toBeTruthy();
   }
 );
+it('blocks deletion when the aggregate has not been migrated', async () => {
+  const onPress = jest.fn();
+  const screen = await render(<DeleteLessonButton onPress={onPress} loading={false} />);
+  expect(screen.getByRole('button', { name: 'Delete' }).props.accessibilityState.disabled).toBe(true);
+  expect(screen.getByText('Cannot delete until enrollment data is available.')).toBeTruthy();
+});
 it('blocks an enrolled lesson and explains the disabled control', async () => {
   const onPress = jest.fn();
   const screen = await render(<DeleteLessonButton count={2} onPress={onPress} loading={false} />);

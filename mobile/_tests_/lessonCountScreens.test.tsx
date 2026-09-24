@@ -94,17 +94,19 @@ it.each([['Learn', FeedScreen], ['Course Details', DetailsScreen]] as const)(
     expect(lessons.enrollInLesson).toHaveBeenCalledWith(owner, expect.objectContaining({ id: 'course' }));
   }
 );
-it('a lesson missing enrollmentCount defaults gracefully to 0 enrolled', async () => {
+it('a lesson missing enrollmentCount stays unavailable until migration', async () => {
   delete course.enrollmentCount; delete course.enrollmentCountVersion;
   const screen = await render(<MyLessonsScreen />);
-  expect(await screen.findByText('0 enrolled')).toBeTruthy();
-  expect(screen.getByRole('button', { name: 'Delete' }).props.accessibilityState.disabled).toBe(false);
+  expect(await screen.findByText('Enrollment count unavailable')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Delete' }).props.accessibilityState.disabled).toBe(true);
 });
 
-it('uses a valid canonical count even without the optional migration version marker', async () => {
+it('does not trust a canonical count without the migration version marker', async () => {
   delete course.enrollmentCountVersion;
+  // Screen tests mock the service layer, so mirror normalizeLesson dropping an
+  // unversioned count. The service behavior itself is covered separately.
+  delete course.enrollmentCount;
   const screen = await render(<MyLessonsScreen />);
-  expect(await screen.findByText('3 learners enrolled')).toBeTruthy();
-  expect(screen.queryByText('Enrollment count pending')).toBeNull();
+  expect(await screen.findByText('Enrollment count unavailable')).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Delete' }).props.accessibilityState.disabled).toBe(true);
 });

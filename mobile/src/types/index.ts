@@ -180,6 +180,9 @@ export type LessonContent =
 
 /** `lessons/{lessonId}` — owner: Member 2. */
 export type Lesson = {
+  enrollmentCount?: number;
+  enrollmentCountVersion?: number;
+  deleting?: boolean;
   id: string;
   teacherId: string;
   teacherName: string;

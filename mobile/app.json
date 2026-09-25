@@ -42,7 +42,7 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "SkillBridge needs access to your photos so you can set a profile picture and attach certificates.",
+          "photosPermission": "SkillBridge needs access to your photos so you can set a profile picture, attach certificates, and share images in chats or posts.",
           "cameraPermission": "SkillBridge needs camera access so you can photograph a certificate."
         }
       ]

@@ -1,4 +1,5 @@
 import { router } from 'expo-router';
+import { Image } from 'expo-image';
 import { useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -10,12 +11,14 @@ import { LoadingState } from '@/components/ui/LoadingState';
 import { Notice } from '@/components/ui/Notice';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { SKILLS, type SkillTag } from '@/constants/skills';
-import { TEXT_LIMITS } from '@/constants/config';
-import { colors, spacing } from '@/constants/theme';
+import { FILE_LIMITS, TEXT_LIMITS } from '@/constants/config';
+import { colors, radius, spacing } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
+import { useMediaPicker, type PickedFile } from '@/hooks/useMediaPicker';
 import { createPost } from '@/services/postService';
 import type { PostType } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
+import { formatFileSize } from '@/utils/format';
 
 const POST_TYPES: { value: PostType; label: string; icon: 'trophy-outline' | 'bulb-outline' | 'help-circle-outline' }[] = [
   { value: 'achievement', label: 'Achievement', icon: 'trophy-outline' },
@@ -23,14 +26,16 @@ const POST_TYPES: { value: PostType; label: string; icon: 'trophy-outline' | 'bu
   { value: 'question', label: 'Question', icon: 'help-circle-outline' },
 ];
 
-/** Text-only composer. Post images are deliberately deferred until this core flow is stable. */
+/** Community post composer with an optional, size-limited image attachment. */
 export default function CreatePostScreen() {
   const { profile } = useAuth();
   const [postType, setPostType] = useState<PostType>('tip');
   const [text, setText] = useState('');
   const [skillTag, setSkillTag] = useState<SkillTag | null>(null);
+  const [image, setImage] = useState<PickedFile | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { pickImage, error: mediaError, clearError: clearMediaError } = useMediaPicker();
 
   if (!profile) return <LoadingState fullScreen label="Loading your profile…" />;
 
@@ -41,7 +46,12 @@ export default function CreatePostScreen() {
     setSaving(true);
     setError(null);
     try {
-      await createPost(author, { type: postType, text, skillTag });
+      await createPost(author, {
+        type: postType,
+        text,
+        skillTag,
+        image: image ? { uri: image.uri, contentType: image.contentType } : undefined,
+      });
       // Returning preserves Community's active Feed tab; its focus listener
       // refreshes the list and shows the new post immediately.
       router.back();
@@ -50,6 +60,13 @@ export default function CreatePostScreen() {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handlePickImage() {
+    if (saving) return;
+
+    const selected = await pickImage({ maxBytes: FILE_LIMITS.postImage, quality: 0.75 });
+    if (selected) setImage(selected);
   }
 
   return (
@@ -64,6 +81,7 @@ export default function CreatePostScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
           {error ? <Notice tone="error" message={error} /> : null}
+          {mediaError ? <Notice tone="error" message={mediaError} /> : null}
 
           <View style={styles.section}>
             {POST_TYPES.map((option) => (
@@ -88,6 +106,34 @@ export default function CreatePostScreen() {
             helper={`${text.length}/${TEXT_LIMITS.post}`}
             editable={!saving}
           />
+
+          <View style={styles.imageSection}>
+            <View style={styles.imageHeader}>
+              <Chip label="Optional image" icon="image-outline" />
+              {image ? (
+                <Button
+                  label="Remove"
+                  variant="ghost"
+                  onPress={() => {
+                    setImage(null);
+                    clearMediaError();
+                  }}
+                />
+              ) : null}
+            </View>
+
+            {image ? (
+              <Image source={{ uri: image.uri }} contentFit="cover" style={styles.imagePreview} />
+            ) : null}
+
+            <Button
+              label={image ? 'Replace image' : `Add image (max ${formatFileSize(FILE_LIMITS.postImage)})`}
+              variant="secondary"
+              icon="image-outline"
+              onPress={() => void handlePickImage()}
+              disabled={saving}
+            />
+          </View>
 
           <View style={styles.skillSection}>
             <View style={styles.skillLabel}>
@@ -147,6 +193,20 @@ const styles = StyleSheet.create({
   },
   skillSection: {
     gap: spacing.sm,
+  },
+  imageSection: {
+    gap: spacing.sm,
+  },
+  imageHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  imagePreview: {
+    width: '100%',
+    aspectRatio: 4 / 3,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceAlt,
   },
   skillLabel: {
     flexDirection: 'row',

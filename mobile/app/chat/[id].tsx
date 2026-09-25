@@ -1,4 +1,6 @@
 import { useIsFocused } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -22,7 +24,9 @@ import { LoadingState } from '@/components/ui/LoadingState';
 import { Notice } from '@/components/ui/Notice';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { colors, radius, sizes, spacing, type } from '@/constants/theme';
+import { FILE_LIMITS } from '@/constants/config';
 import { useAuth } from '@/hooks/useAuth';
+import { useMediaPicker, type PickedFile } from '@/hooks/useMediaPicker';
 import { markChatRead, sendMessage, subscribeToChat, subscribeToMessages } from '@/services/chatService';
 import type { Chat, Message } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
@@ -41,9 +45,11 @@ export default function ChatThreadScreen() {
   const [threadError, setThreadError] = useState<string | null>(null);
   const [appState, setAppState] = useState(AppState.currentState);
   const [draft, setDraft] = useState('');
+  const [attachment, setAttachment] = useState<PickedFile | null>(null);
   const [sending, setSending] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
   const listRef = useRef<FlatList<Message>>(null);
+  const { pickImage, error: mediaError, clearError: clearMediaError } = useMediaPicker();
 
   useEffect(() => {
     if (!chatId) return;
@@ -115,20 +121,35 @@ export default function ChatThreadScreen() {
 
   async function handleSend() {
     const text = draft.trim();
-    if (!profile || !chatId || !text || sending) return;
+    const image = attachment;
+    if (!profile || !chatId || (!text && !image) || sending) return;
 
     setThreadError(null);
     setSending(true);
     setDraft('');
+    setAttachment(null);
 
     try {
-      await sendMessage(chatId, profile, text);
+      await sendMessage(
+        chatId,
+        profile,
+        text,
+        image ? { uri: image.uri, contentType: image.contentType } : undefined
+      );
     } catch (error) {
       setDraft(text);
+      setAttachment(image);
       setThreadError(errorMessage(error));
     } finally {
       setSending(false);
     }
+  }
+
+  async function handlePickImage() {
+    if (sending || threadExists !== true) return;
+
+    const image = await pickImage({ maxBytes: FILE_LIMITS.chatImage, quality: 0.75 });
+    if (image) setAttachment(image);
   }
 
   if (!profile) {
@@ -146,7 +167,7 @@ export default function ChatThreadScreen() {
 
   const showUnavailable = threadExists === false && !threadError;
   const showFatalError = !!threadError && messages.length === 0;
-  const canSend = draft.trim().length > 0 && !sending && threadExists === true;
+  const canSend = (draft.trim().length > 0 || attachment !== null) && !sending && threadExists === true;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -181,6 +202,11 @@ export default function ChatThreadScreen() {
             <Notice tone="error" message={threadError} />
           </View>
         ) : null}
+        {mediaError ? (
+          <View style={styles.notice}>
+            <Notice tone="error" message={mediaError} />
+          </View>
+        ) : null}
 
         {loading ? (
           <LoadingState label="Loading messages…" />
@@ -211,25 +237,52 @@ export default function ChatThreadScreen() {
         )}
 
         <View style={styles.composer}>
-          <TextInput
-            value={draft}
-            onChangeText={setDraft}
-            placeholder={`Message ${otherParticipant.name}`}
-            placeholderTextColor={colors.inkMuted}
-            accessibilityLabel="Write a message"
-            autoCapitalize="sentences"
-            autoCorrect
-            multiline
-            editable={!sending && threadExists === true}
-            style={styles.input}
-          />
-          <Button
-            label="Send"
-            onPress={() => void handleSend()}
-            loading={sending}
-            disabled={!canSend}
-            style={styles.sendButton}
-          />
+          {attachment ? (
+            <View style={styles.attachmentPreview}>
+              <Image source={{ uri: attachment.uri }} contentFit="cover" style={styles.attachmentImage} />
+              <Pressable
+                onPress={() => {
+                  setAttachment(null);
+                  clearMediaError();
+                }}
+                disabled={sending}
+                accessibilityRole="button"
+                accessibilityLabel="Remove attached image"
+                style={styles.removeAttachment}>
+                <Ionicons name="close" size={sizes.iconSm} color={colors.inkInverse} />
+              </Pressable>
+            </View>
+          ) : null}
+
+          <View style={styles.composerRow}>
+            <Pressable
+              onPress={() => void handlePickImage()}
+              disabled={sending || threadExists !== true}
+              accessibilityRole="button"
+              accessibilityLabel="Attach image"
+              style={({ pressed }) => [styles.attachButton, pressed && styles.attachPressed]}>
+              <Ionicons name="image-outline" size={sizes.iconMd} color={colors.accent} />
+            </Pressable>
+            <TextInput
+              value={draft}
+              onChangeText={setDraft}
+              placeholder={`Message ${otherParticipant.name}`}
+              placeholderTextColor={colors.inkMuted}
+              accessibilityLabel="Write a message"
+              autoCapitalize="sentences"
+              autoCorrect
+              multiline
+              editable={!sending && threadExists === true}
+              style={styles.input}
+            />
+            <Button
+              label="Send"
+              onPress={() => void handleSend()}
+              loading={sending}
+              disabled={!canSend}
+              style={styles.sendButton}
+            />
+          </View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -262,14 +315,49 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   composer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
     gap: spacing.sm,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     backgroundColor: colors.surface,
     borderTopWidth: StyleSheet.hairlineWidth * 2,
     borderTopColor: colors.border,
+  },
+  composerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: spacing.sm,
+  },
+  attachmentPreview: {
+    alignSelf: 'flex-start',
+  },
+  attachmentImage: {
+    width: sizes.preview,
+    height: sizes.preview,
+    maxWidth: '100%',
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceAlt,
+  },
+  removeAttachment: {
+    position: 'absolute',
+    top: spacing.sm,
+    right: spacing.sm,
+    width: sizes.touchMin,
+    height: sizes.touchMin,
+    borderRadius: radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.ink,
+  },
+  attachButton: {
+    width: sizes.touchMin,
+    height: sizes.touchMin,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.md,
+    backgroundColor: colors.accentSurface,
+  },
+  attachPressed: {
+    backgroundColor: colors.surfaceAlt,
   },
   input: {
     flex: 1,

@@ -19,10 +19,16 @@ import {
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 
-import { PAGE_SIZE, TEXT_LIMITS } from '@/constants/config';
+import { FILE_LIMITS, PAGE_SIZE, TEXT_LIMITS } from '@/constants/config';
 import { skillByTag } from '@/constants/skills';
 import { db } from '@/firebase/config';
+import {
+  communityImagePath,
+  validateCommunityImageUpload,
+  type CommunityImageUpload,
+} from '@/services/communityMedia';
 import type { Comment, Post, PostType, SkillTag, User } from '@/types';
+import { deleteFile, uploadFile } from '@/utils/storage';
 
 const postsCol = collection(db, 'posts');
 const POST_TYPES: PostType[] = ['achievement', 'tip', 'question'];
@@ -34,6 +40,7 @@ export type CreatePostInput = {
   type: PostType;
   text: string;
   skillTag?: SkillTag | null;
+  image?: CommunityImageUpload | null;
 };
 
 export type ListPostsOptions = {
@@ -89,28 +96,41 @@ function validatePostInput(input: CreatePostInput): { text: string; skillTag?: S
   return { text, ...(input.skillTag ? { skillTag: input.skillTag } : {}) };
 }
 
-/** Creates a text-only community post. Image uploads remain a later enhancement. */
+/** Creates a post with optional image media and removes a failed upload if Firestore rejects the post. */
 export async function createPost(author: PostAuthor, input: CreatePostInput): Promise<string> {
   const { text, skillTag } = validatePostInput(input);
   const postRef = doc(postsCol);
+  const image = input.image ? validateCommunityImageUpload(input.image) : null;
+  let upload: { url: string; path: string } | null = null;
 
-  await runTransaction(db, async (transaction) => {
-    transaction.set(postRef, {
-      id: postRef.id,
-      authorId: author.uid,
-      authorName: author.name,
-      authorAvatarUrl: author.avatarUrl ?? '',
-      type: input.type,
-      text,
-      ...(skillTag ? { skillTag } : {}),
-      likedBy: [],
-      likeCount: 0,
-      commentCount: 0,
-      // Gemini moderation is deliberately not part of this text-only core flow.
-      moderation: 'skipped',
-      createdAt: serverTimestamp(),
+  if (image) {
+    const path = communityImagePath('posts', postRef.id, postRef.id, image.contentType);
+    upload = await uploadFile(path, image.uri, FILE_LIMITS.postImage, image.contentType);
+  }
+
+  try {
+    await runTransaction(db, async (transaction) => {
+      transaction.set(postRef, {
+        id: postRef.id,
+        authorId: author.uid,
+        authorName: author.name,
+        authorAvatarUrl: author.avatarUrl ?? '',
+        type: input.type,
+        text,
+        ...(skillTag ? { skillTag } : {}),
+        ...(upload ? { imageUrl: upload.url, imagePath: upload.path } : {}),
+        likedBy: [],
+        likeCount: 0,
+        commentCount: 0,
+        // Gemini moderation is deliberately not part of this core flow.
+        moderation: 'skipped',
+        createdAt: serverTimestamp(),
+      });
     });
-  });
+  } catch (error) {
+    if (upload) await deleteFile(upload.path).catch(() => undefined);
+    throw error;
+  }
 
   return postRef.id;
 }
@@ -241,6 +261,7 @@ export async function deletePost(postId: string, authorId: string): Promise<void
   const postRef = doc(postsCol, postId);
   const commentsCol = collection(postRef, 'comments');
   let deletionStarted = false;
+  let imagePath = '';
 
   try {
     await runTransaction(db, async (transaction) => {
@@ -253,6 +274,7 @@ export async function deletePost(postId: string, authorId: string): Promise<void
         throw new Error('This post is already being deleted.');
       }
 
+      imagePath = typeof snapshot.data().imagePath === 'string' ? snapshot.data().imagePath : '';
       transaction.update(postRef, { deleting: true });
     });
     deletionStarted = true;
@@ -277,6 +299,10 @@ export async function deletePost(postId: string, authorId: string): Promise<void
 
       transaction.delete(postRef);
     });
+
+    // Storage has no cross-service transaction with Firestore. The document is
+    // already gone, so a failed cleanup must not make the UI claim deletion failed.
+    if (imagePath) await deleteFile(imagePath).catch(() => undefined);
   } catch (error) {
     // A failed cleanup must not leave a normal post permanently unavailable.
     if (deletionStarted) {

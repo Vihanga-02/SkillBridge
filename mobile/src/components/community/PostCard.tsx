@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { format, isToday } from 'date-fns';
+import { Image } from 'expo-image';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Avatar } from '@/components/ui/Avatar';
@@ -69,6 +70,14 @@ export function PostCard({
         </View>
 
         <Text style={styles.body}>{post.text}</Text>
+        {post.imageUrl ? (
+          <Image
+            source={{ uri: post.imageUrl }}
+            contentFit="cover"
+            accessibilityLabel={`Image attached to ${meta.label.toLowerCase()} by ${post.authorName}`}
+            style={styles.image}
+          />
+        ) : null}
         {post.skillTag ? <SkillChip label={skillLabel(post.skillTag)} /> : null}
       </Pressable>
 
@@ -157,6 +166,12 @@ const styles = StyleSheet.create({
   body: {
     ...type.body,
     color: colors.ink,
+  },
+  image: {
+    width: '100%',
+    aspectRatio: 4 / 3,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceAlt,
   },
   actions: {
     flexDirection: 'row',

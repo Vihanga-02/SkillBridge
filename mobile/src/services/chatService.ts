@@ -20,9 +20,15 @@ import {
 } from 'firebase/firestore';
 
 import { db } from '@/firebase/config';
-import { PAGE_SIZE } from '@/constants/config';
+import { FILE_LIMITS, PAGE_SIZE } from '@/constants/config';
+import {
+  communityImagePath,
+  validateCommunityImageUpload,
+  type CommunityImageUpload,
+} from '@/services/communityMedia';
 import type { Chat, ChatParticipant, Message, User } from '@/types';
 import { createChatId } from '@/utils/chat';
+import { deleteFile, uploadFile } from '@/utils/storage';
 
 export { createChatId } from '@/utils/chat';
 
@@ -210,46 +216,60 @@ export async function markChatRead(chatId: string, uid: string): Promise<void> {
 export async function sendMessage(
   chatId: string,
   sender: DirectChatUser,
-  rawText: string
+  rawText: string,
+  rawImage?: CommunityImageUpload | null
 ): Promise<void> {
   const text = rawText.trim();
-  if (!text) {
-    throw new Error('Type a message before sending.');
-  }
+  if (!text && !rawImage) throw new Error('Type a message or choose an image before sending.');
 
   const chatRef = doc(db, 'chats', chatId);
   const messageRef = doc(collection(chatRef, 'messages'));
+  const image = rawImage ? validateCommunityImageUpload(rawImage) : null;
+  let upload: { url: string; path: string } | null = null;
 
-  await runTransaction(db, async (transaction) => {
-    const chatSnapshot = await transaction.get(chatRef);
-    if (!chatSnapshot.exists()) {
-      throw new Error('This conversation is no longer available.');
-    }
+  if (image) {
+    const path = communityImagePath('chats', chatId, messageRef.id, image.contentType);
+    upload = await uploadFile(path, image.uri, FILE_LIMITS.chatImage, image.contentType);
+  }
 
-    const chat = toChat(chatSnapshot.data(), chatSnapshot.id);
-    if (!chat.participantIds.includes(sender.uid)) {
-      throw new Error('You cannot send a message in this conversation.');
-    }
+  try {
+    await runTransaction(db, async (transaction) => {
+      const chatSnapshot = await transaction.get(chatRef);
+      if (!chatSnapshot.exists()) {
+        throw new Error('This conversation is no longer available.');
+      }
 
-    const unreadCount = Object.fromEntries(
-      chat.participantIds.map((participantId) => [
-        participantId,
-        participantId === sender.uid ? 0 : (chat.unreadCount?.[participantId] ?? 0) + 1,
-      ])
-    );
+      const chat = toChat(chatSnapshot.data(), chatSnapshot.id);
+      if (!chat.participantIds.includes(sender.uid)) {
+        throw new Error('You cannot send a message in this conversation.');
+      }
 
-    transaction.set(messageRef, {
-      senderId: sender.uid,
-      senderName: sender.name,
-      text,
-      moderation: 'clean',
-      createdAt: serverTimestamp(),
+      const unreadCount = Object.fromEntries(
+        chat.participantIds.map((participantId) => [
+          participantId,
+          participantId === sender.uid ? 0 : (chat.unreadCount?.[participantId] ?? 0) + 1,
+        ])
+      );
+
+      transaction.set(messageRef, {
+        senderId: sender.uid,
+        senderName: sender.name,
+        text,
+        ...(upload ? { imageUrl: upload.url, imagePath: upload.path } : {}),
+        moderation: 'clean',
+        createdAt: serverTimestamp(),
+      });
+      transaction.update(chatRef, {
+        lastMessage: text || 'Photo',
+        lastMessageAt: serverTimestamp(),
+        lastSenderId: sender.uid,
+        unreadCount,
+      });
     });
-    transaction.update(chatRef, {
-      lastMessage: text,
-      lastMessageAt: serverTimestamp(),
-      lastSenderId: sender.uid,
-      unreadCount,
-    });
-  });
+  } catch (error) {
+    // Firestore and Storage cannot share one transaction. If the message write
+    // fails after upload, remove the now-unreferenced object before retrying.
+    if (upload) await deleteFile(upload.path).catch(() => undefined);
+    throw error;
+  }
 }

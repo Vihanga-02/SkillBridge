@@ -6,15 +6,18 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppState,
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
+  Text,
   TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ChatImageViewer } from '@/components/community/ChatImageViewer';
 import { MessageBubble } from '@/components/community/MessageBubble';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
@@ -46,6 +49,7 @@ export default function ChatThreadScreen() {
   const [appState, setAppState] = useState(AppState.currentState);
   const [draft, setDraft] = useState('');
   const [attachment, setAttachment] = useState<PickedFile | null>(null);
+  const [viewerImage, setViewerImage] = useState<{ url: string; senderName: string } | null>(null);
   const [sending, setSending] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
   const listRef = useRef<FlatList<Message>>(null);
@@ -222,7 +226,16 @@ export default function ChatThreadScreen() {
             ref={listRef}
             data={messages}
             keyExtractor={(message) => message.id}
-            renderItem={({ item }) => <MessageBubble message={item} isMine={item.senderId === profile.uid} />}
+            renderItem={({ item }) => (
+              <MessageBubble
+                message={item}
+                isMine={item.senderId === profile.uid}
+                onImagePress={(url, senderName) => {
+                  Keyboard.dismiss();
+                  setViewerImage({ url, senderName });
+                }}
+              />
+            )}
             contentContainerStyle={[styles.messages, messages.length === 0 && styles.messagesEmpty]}
             ListEmptyComponent={
               <EmptyState
@@ -240,6 +253,12 @@ export default function ChatThreadScreen() {
           {attachment ? (
             <View style={styles.attachmentPreview}>
               <Image source={{ uri: attachment.uri }} contentFit="cover" style={styles.attachmentImage} />
+              <View style={styles.attachmentInfo}>
+                <Text style={styles.attachmentName} numberOfLines={1}>
+                  {attachment.name || 'Photo'}
+                </Text>
+                <Text style={styles.attachmentHint}>Ready to send</Text>
+              </View>
               <Pressable
                 onPress={() => {
                   setAttachment(null);
@@ -259,14 +278,19 @@ export default function ChatThreadScreen() {
               onPress={() => void handlePickImage()}
               disabled={sending || threadExists !== true}
               accessibilityRole="button"
-              accessibilityLabel="Attach image"
-              style={({ pressed }) => [styles.attachButton, pressed && styles.attachPressed]}>
-              <Ionicons name="image-outline" size={sizes.iconMd} color={colors.accent} />
+              accessibilityLabel="Attach a photo"
+              accessibilityHint="Choose a photo to send"
+              style={({ pressed }) => [
+                styles.attachButton,
+                pressed && styles.attachPressed,
+                (sending || threadExists !== true) && styles.attachDisabled,
+              ]}>
+              <Ionicons name="attach-outline" size={sizes.iconMd} color={colors.accent} />
             </Pressable>
             <TextInput
               value={draft}
               onChangeText={setDraft}
-              placeholder={`Message ${otherParticipant.name}`}
+              placeholder="Enter message"
               placeholderTextColor={colors.inkMuted}
               accessibilityLabel="Write a message"
               autoCapitalize="sentences"
@@ -277,6 +301,7 @@ export default function ChatThreadScreen() {
             />
             <Button
               label="Send"
+              icon="send-outline"
               onPress={() => void handleSend()}
               loading={sending}
               disabled={!canSend}
@@ -285,6 +310,8 @@ export default function ChatThreadScreen() {
           </View>
         </View>
       </KeyboardAvoidingView>
+
+      <ChatImageViewer image={viewerImage} onClose={() => setViewerImage(null)} />
     </SafeAreaView>
   );
 }
@@ -328,19 +355,32 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   attachmentPreview: {
-    alignSelf: 'flex-start',
-  },
-  attachmentImage: {
-    width: sizes.preview,
-    height: sizes.preview,
-    maxWidth: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    padding: spacing.sm,
     borderRadius: radius.md,
     backgroundColor: colors.surfaceAlt,
   },
+  attachmentImage: {
+    width: sizes.touchMin * 2,
+    height: sizes.touchMin * 2,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceAlt,
+  },
+  attachmentInfo: {
+    flex: 1,
+    gap: spacing.xs,
+  },
+  attachmentName: {
+    ...type.bodyStrong,
+    color: colors.ink,
+  },
+  attachmentHint: {
+    ...type.caption,
+    color: colors.inkMuted,
+  },
   removeAttachment: {
-    position: 'absolute',
-    top: spacing.sm,
-    right: spacing.sm,
     width: sizes.touchMin,
     height: sizes.touchMin,
     borderRadius: radius.full,
@@ -359,6 +399,9 @@ const styles = StyleSheet.create({
   attachPressed: {
     backgroundColor: colors.surfaceAlt,
   },
+  attachDisabled: {
+    opacity: 0.45,
+  },
   input: {
     flex: 1,
     minHeight: sizes.control,
@@ -372,5 +415,5 @@ const styles = StyleSheet.create({
   },
   sendButton: {
     alignSelf: 'flex-end',
-   },
+  },
 });

@@ -104,6 +104,15 @@ export default function SessionsScreen() {
     () => bookings.filter((booking) => booking.learnerId === uid),
     [bookings, uid]
   );
+  const activeBookingBySession = useMemo(
+    () =>
+      new Map(
+        learnerBookings
+          .filter((booking) => ['pending', 'confirmed', 'completed'].includes(booking.status))
+          .map((booking) => [booking.sessionId, booking])
+      ),
+    [learnerBookings]
+  );
   const upcomingBookings = learnerBookings.filter((booking) =>
     ['pending', 'confirmed'].includes(booking.status)
   );
@@ -397,7 +406,12 @@ export default function SessionsScreen() {
               onAction={browseScope === 'forYou' ? () => setBrowseScope('all') : undefined}
             />
           ) : (
-            <SessionCards sessions={visibleSessions} onBook={confirmQuickBooking} actingId={actingId} />
+            <SessionCards
+              sessions={visibleSessions}
+              bookingBySessionId={activeBookingBySession}
+              onBook={confirmQuickBooking}
+              actingId={actingId}
+            />
           )}
         </ScrollView>
       ) : null}
@@ -601,26 +615,41 @@ export default function SessionsScreen() {
 
 function SessionCards({
   sessions,
+  bookingBySessionId,
   onBook,
   actingId,
 }: {
   sessions: Session[];
+  bookingBySessionId: ReadonlyMap<string, Booking>;
   onBook: (session: Session) => void;
   actingId: string | null;
 }) {
   return (
     <View style={styles.list}>
-      {sessions.map((session) => (
-        <SessionCard
-          key={session.id}
-          session={session}
-          ctaLabel="Book now"
-          bookingAction
-          actionLoading={actingId === session.id}
-          onPress={() => router.push({ pathname: '/session/[id]', params: { id: session.id } })}
-          onActionPress={() => onBook(session)}
-        />
-      ))}
+      {sessions.map((session) => {
+        const booking = bookingBySessionId.get(session.id);
+        const ctaLabel =
+          booking?.status === 'pending'
+            ? 'Request sent'
+            : booking?.status === 'confirmed'
+              ? 'Booked'
+              : booking?.status === 'completed'
+                ? 'Completed'
+                : 'Book now';
+
+        return (
+          <SessionCard
+            key={session.id}
+            session={session}
+            ctaLabel={ctaLabel}
+            bookingAction
+            actionLoading={actingId === session.id}
+            actionDisabled={!!booking}
+            onPress={() => router.push({ pathname: '/session/[id]', params: { id: session.id } })}
+            onActionPress={() => onBook(session)}
+          />
+        );
+      })}
     </View>
   );
 }

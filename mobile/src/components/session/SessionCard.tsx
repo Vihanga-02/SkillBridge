@@ -22,6 +22,7 @@ type Props = {
   ctaLabel?: string;
   bookingAction?: boolean;
   actionLoading?: boolean;
+  actionDisabled?: boolean;
 };
 
 export function SessionCard({
@@ -31,6 +32,7 @@ export function SessionCard({
   ctaLabel = 'View details',
   bookingAction = false,
   actionLoading = false,
+  actionDisabled = false,
 }: Props) {
   const bookedSeats = Math.max(0, Math.min(session.seatsTaken, session.capacity));
   const seatsLeft = Math.max(0, session.capacity - bookedSeats);
@@ -105,10 +107,10 @@ export function SessionCard({
       {onPress || onActionPress ? (
         <Button
           label={ctaLabel}
-          variant={!bookingAction || seatsLeft > 0 ? 'primary' : 'secondary'}
+          variant={!bookingAction || (seatsLeft > 0 && !actionDisabled) ? 'primary' : 'secondary'}
           onPress={() => (onActionPress ?? onPress)?.()}
           loading={actionLoading}
-          disabled={bookingAction && (session.status !== 'open' || seatsLeft === 0)}
+          disabled={actionDisabled || (bookingAction && (session.status !== 'open' || seatsLeft === 0))}
           style={styles.cta}
         />
       ) : null}

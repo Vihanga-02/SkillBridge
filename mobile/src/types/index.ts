@@ -388,16 +388,24 @@ export type Post = {
   commentCount: number;
   moderation: ModerationState;
   createdAt: Timestamp | null;
+  updatedAt?: Timestamp | null;
 };
 
 /** `posts/{postId}/comments/{commentId}` — owner: Member 4. */
+export type CommentReaction = 'like' | 'love' | 'celebrate';
+export type CommentReactions = Record<CommentReaction, string[]>;
+
 export type Comment = {
   id: string;
   authorId: string;
   authorName: string;
   authorAvatarUrl: string;
   text: string;
+  parentCommentId: string | null;
+  replyCount: number;
+  reactions: CommentReactions;
   createdAt: Timestamp | null;
+  updatedAt?: Timestamp | null;
 };
 
 /** `aiUsage/{uid}` — the daily Gemini cap (§11.4). */

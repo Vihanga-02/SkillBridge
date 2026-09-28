@@ -1,7 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker, {
+  DateTimePickerAndroid,
+  type DateTimePickerEvent,
+} from '@react-native-community/datetimepicker';
+import { format, isSameDay, startOfDay } from 'date-fns';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BookingCard } from '@/components/session/BookingCard';
@@ -26,8 +31,10 @@ import type { Booking, Session } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
 
 type SessionsView = 'browse' | 'bookings' | 'teaching';
+type BrowseScope = 'all' | 'forYou';
 type BookingFilter = 'upcoming' | 'past' | 'cancelled';
 type TeachingView = 'requests' | 'sessions' | 'schedule' | 'history';
+type BrowseDateFilter = 'all' | 'today' | 'custom';
 
 export default function SessionsScreen() {
   const { profile } = useAuth();
@@ -39,8 +46,12 @@ export default function SessionsScreen() {
   const [view, setView] = useState<SessionsView>('browse');
   const [teachingViewTab, setTeachingViewTab] = useState<TeachingView>('requests');
   const [bookingFilter, setBookingFilter] = useState<BookingFilter>('upcoming');
+  const [browseScope, setBrowseScope] = useState<BrowseScope>('all');
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState<Category | null>(null);
+  const [dateFilter, setDateFilter] = useState<BrowseDateFilter>('all');
+  const [customDate, setCustomDate] = useState(() => startOfDay(new Date()));
+  const [iosDatePickerOpen, setIosDatePickerOpen] = useState(false);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [myOffers, setMyOffers] = useState<Session[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -116,11 +127,45 @@ export default function SessionsScreen() {
   );
   const visibleSessions = useMemo(() => {
     const term = search.trim().toLowerCase();
+    const wantedSkills = new Set(profile?.skillTagsWanted ?? []);
+    const selectedDate =
+      dateFilter === 'today'
+        ? startOfDay(new Date())
+        : dateFilter === 'custom'
+          ? customDate
+          : null;
+
     return sessions.filter((session) => {
       const searchable = `${session.title} ${session.teacherName} ${skillLabel(session.skillTag)}`.toLowerCase();
-      return (!category || session.category === category) && (!term || searchable.includes(term));
+      const startDate = session.startAt?.toDate?.();
+      return (
+        (browseScope === 'all' || wantedSkills.has(session.skillTag)) &&
+        (!category || session.category === category) &&
+        (!term || searchable.includes(term)) &&
+        (!selectedDate || (!!startDate && isSameDay(startDate, selectedDate)))
+      );
     });
-  }, [category, search, sessions]);
+  }, [browseScope, category, customDate, dateFilter, profile?.skillTagsWanted, search, sessions]);
+
+  function onCustomDateChange(event: DateTimePickerEvent, selected?: Date) {
+    if (event.type === 'set' && selected) {
+      setCustomDate(startOfDay(selected));
+      setDateFilter('custom');
+    }
+  }
+
+  function openCustomDatePicker() {
+    if (Platform.OS === 'android') {
+      DateTimePickerAndroid.open({
+        value: customDate,
+        minimumDate: startOfDay(new Date()),
+        mode: 'date',
+        onChange: onCustomDateChange,
+      });
+      return;
+    }
+    setIosDatePickerOpen(true);
+  }
 
   const filteredBookings =
     bookingFilter === 'upcoming'
@@ -260,16 +305,41 @@ export default function SessionsScreen() {
       {!teacherOnly && view === 'browse' && !sessionsLoading ? (
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           {sessionsError ? <Notice tone="error" message={sessionsError} /> : null}
-          <View style={styles.searchBox}>
-            <Ionicons name="search-outline" size={sizes.iconMd} color={colors.inkMuted} />
-            <TextInput
-              value={search}
-              onChangeText={setSearch}
-              placeholder="Search sessions, skills or teachers"
-              placeholderTextColor={colors.inkFaint}
-              style={styles.searchInput}
-              accessibilityLabel="Search sessions"
-            />
+          <View style={styles.searchRow}>
+            <View style={styles.searchBox}>
+              <Ionicons name="search-outline" size={sizes.iconMd} color={colors.inkMuted} />
+              <TextInput
+                value={search}
+                onChangeText={setSearch}
+                placeholder="Search sessions"
+                placeholderTextColor={colors.inkFaint}
+                style={styles.searchInput}
+                accessibilityLabel="Search sessions"
+              />
+            </View>
+            <Pressable
+              accessibilityRole="switch"
+              accessibilityLabel="Show sessions for you"
+              accessibilityState={{ checked: browseScope === 'forYou' }}
+              onPress={() => setBrowseScope((current) => current === 'all' ? 'forYou' : 'all')}
+              style={({ pressed }) => [
+                styles.forYouButton,
+                browseScope === 'forYou' && styles.forYouButtonSelected,
+                pressed && styles.forYouButtonPressed,
+              ]}>
+              <Ionicons
+                name="sparkles-outline"
+                size={sizes.iconSm}
+                color={browseScope === 'forYou' ? colors.accent : colors.inkMuted}
+              />
+              <Text
+                style={[
+                  styles.forYouButtonText,
+                  browseScope === 'forYou' && styles.forYouButtonTextSelected,
+                ]}>
+                For You
+              </Text>
+            </Pressable>
           </View>
           <ScrollView
             horizontal
@@ -286,12 +356,75 @@ export default function SessionsScreen() {
               />
             ))}
           </ScrollView>
+          <View style={styles.dateFilterSection}>
+            <Text style={styles.filterLabel}>Date</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.categoryRow}>
+              <Chip
+                size="sm"
+                label="All dates"
+                selected={dateFilter === 'all'}
+                onPress={() => setDateFilter('all')}
+              />
+              <Chip
+                size="sm"
+                label="Today"
+                selected={dateFilter === 'today'}
+                onPress={() => setDateFilter('today')}
+              />
+              <Chip
+                size="sm"
+                label={dateFilter === 'custom' ? format(customDate, 'd MMM') : 'Pick date'}
+                selected={dateFilter === 'custom'}
+                onPress={openCustomDatePicker}
+              />
+            </ScrollView>
+          </View>
           {visibleSessions.length === 0 ? (
-            <EmptyState icon="search-outline" title="No sessions found" message="Try another search or category." />
+            <EmptyState
+              icon="search-outline"
+              title={browseScope === 'forYou' ? 'No sessions for you yet' : 'No sessions found'}
+              message={
+                browseScope === 'forYou'
+                  ? (profile.skillTagsWanted ?? []).length === 0
+                    ? 'Choose skills in your learning goals to get personalized sessions.'
+                    : 'No sessions currently match your selected skills. Try browsing all sessions.'
+                  : 'Try another search, category or date.'
+              }
+              actionLabel={browseScope === 'forYou' ? 'Browse all sessions' : undefined}
+              onAction={browseScope === 'forYou' ? () => setBrowseScope('all') : undefined}
+            />
           ) : (
             <SessionCards sessions={visibleSessions} onBook={confirmQuickBooking} actingId={actingId} />
           )}
         </ScrollView>
+      ) : null}
+
+      {Platform.OS === 'ios' ? (
+        <Modal
+          visible={iosDatePickerOpen}
+          animationType="slide"
+          transparent
+          onRequestClose={() => setIosDatePickerOpen(false)}>
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => setIosDatePickerOpen(false)}
+            accessibilityLabel="Close date picker"
+          />
+          <View style={styles.datePickerSheet}>
+            <Text style={styles.datePickerTitle}>Choose a session date</Text>
+            <DateTimePicker
+              value={customDate}
+              minimumDate={startOfDay(new Date())}
+              mode="date"
+              display="inline"
+              onChange={onCustomDateChange}
+            />
+            <Button label="Done" onPress={() => setIosDatePickerOpen(false)} />
+          </View>
+        </Modal>
       ) : null}
 
       {!teacherOnly && view === 'bookings' && bookingsLoading ? (
@@ -590,9 +723,30 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accentSurface,
   },
   segmentButton: { flex: 1 },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  forYouButton: {
+    minHeight: sizes.touchMin,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+  },
+  forYouButtonSelected: { borderColor: colors.accent, backgroundColor: colors.accentSurface },
+  forYouButtonPressed: { opacity: 0.75 },
+  forYouButtonText: { ...type.caption, color: colors.inkMuted, fontWeight: '600' },
+  forYouButtonTextSelected: { color: colors.accent },
   noticeWrap: { gap: spacing.sm, paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
   content: { gap: spacing.lg, padding: spacing.lg, paddingBottom: spacing.xxl },
   searchBox: {
+    flex: 1,
     minHeight: sizes.touchMin,
     flexDirection: 'row',
     alignItems: 'center',
@@ -605,6 +759,17 @@ const styles = StyleSheet.create({
   },
   searchInput: { ...type.body, color: colors.ink, flex: 1 },
   categoryRow: { gap: spacing.sm, paddingRight: spacing.lg },
+  dateFilterSection: { gap: spacing.sm },
+  filterLabel: { ...type.label, color: colors.ink },
+  modalBackdrop: { flex: 1, backgroundColor: colors.ink, opacity: 0.4 },
+  datePickerSheet: {
+    gap: spacing.md,
+    padding: spacing.lg,
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+  },
+  datePickerTitle: { ...type.h2, color: colors.ink },
   teachingTabs: {
     flexDirection: 'row',
     gap: spacing.xs,

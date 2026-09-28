@@ -1,5 +1,6 @@
+import { EnrollmentCount } from '@/components/lesson/EnrollmentCount';
 import { Ionicons } from '@expo/vector-icons';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -126,9 +127,9 @@ export default function UserProfileScreen() {
     }
   }, [me]);
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     void loadViewerEnrollments();
-  }, [loadViewerEnrollments]);
+  }, [loadViewerEnrollments]));
 
   if (userLoading) {
     return (
@@ -340,8 +341,10 @@ export default function UserProfileScreen() {
                   const isOwnLesson = me?.uid === lesson.teacherId;
                   const isEnrolled = enrolledIds.has(lesson.id);
                   const enrollment = enrollmentByLesson.get(lesson.id);
-                  const canEnroll = !!me && viewerCanLearn && !isOwnLesson && !isEnrolled;
-                  const reviewSubmitted = enrollment?.completed && enrollment.reviewedByLearner;
+                  const canEnroll =
+                    !!me && viewerCanLearn && !isOwnLesson && !isEnrolled && !lesson.deleting;
+                  const reviewSubmitted =
+                    enrollment?.completed === true && enrollment.reviewedByLearner === true;
                   const actionLabel = reviewSubmitted
                     ? 'Review submitted'
                     : enrollment?.completed
@@ -358,6 +361,7 @@ export default function UserProfileScreen() {
                         <Text style={styles.lessonMeta}>
                           {lesson.contents.length} content {lesson.contents.length === 1 ? 'item' : 'items'}
                         </Text>
+                        <EnrollmentCount count={lesson.enrollmentCount} />
 
                         {enrollment ? (
                           <ProgressBar

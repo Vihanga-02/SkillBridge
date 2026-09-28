@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/Input';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { Notice } from '@/components/ui/Notice';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
+import { TimeField } from '@/components/ui/TimeField';
 import { LEVELS, LEVEL_LABELS, skillLabel, type Level, type SkillTag } from '@/constants/skills';
 import { colors, spacing, type } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
@@ -276,13 +277,11 @@ export default function CreateSessionScreen() {
             minDate={todayIso()}
             helper="Pick a future day for the session."
           />
-          <Input
-            label="Start time (24h)"
+          <TimeField
+            label="Start time"
             value={time}
-            onChangeText={setTime}
-            placeholder="18:00"
-            helper="Example: 18:00 for 6.00 PM"
-            autoCapitalize="none"
+            onChange={setTime}
+            helper="Tap to choose the hour, minutes, and AM or PM."
           />
           <ChipSelect
             label="Duration"

@@ -333,7 +333,7 @@ export default function SessionsScreen() {
               onPress={() => setTeachingViewTab('requests')}
             />
             <TeachingTab
-              label="My Sessions"
+              label="Hosted"
               icon="calendar-outline"
               selected={teachingViewTab === 'sessions'}
               onPress={() => setTeachingViewTab('sessions')}
@@ -387,7 +387,7 @@ export default function SessionsScreen() {
             </View>
           ) : teachingViewTab === 'sessions' ? (
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>My Published Sessions</Text>
+                <Text style={styles.sectionTitle}>Sessions I Host</Text>
                 {upcomingOffers.length === 0 ? (
                   <EmptyState
                     icon="calendar-outline"

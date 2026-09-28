@@ -230,10 +230,27 @@ export default function MyLessonsScreen() {
                             completed={enrollment.completed}
                           />
                           <Button
-                            label={enrollment.completed ? 'Review Lesson' : 'Continue Learning'}
-                            icon="play-outline"
+                            label={
+                              enrollment.completed
+                                ? enrollment.reviewedByLearner
+                                  ? 'Review submitted'
+                                  : 'Review Lesson'
+                                : 'Continue Learning'
+                            }
+                            icon={
+                              enrollment.completed
+                                ? enrollment.reviewedByLearner
+                                  ? 'checkmark-circle-outline'
+                                  : 'star-outline'
+                                : 'play-outline'
+                            }
+                            variant={enrollment.completed ? 'secondary' : 'primary'}
+                            disabled={enrollment.completed && enrollment.reviewedByLearner}
                             onPress={() =>
-                              router.push({ pathname: '/lesson/[id]', params: { id: enrollment.lessonId } })
+                              router.push({
+                                pathname: enrollment.completed ? '/review/lesson/[id]' : '/lesson/[id]',
+                                params: { id: enrollment.lessonId },
+                              })
                             }
                           />
                         </View>

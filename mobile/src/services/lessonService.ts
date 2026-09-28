@@ -73,6 +73,9 @@ function normalizeEnrollment(data: Record<string, unknown>, id: string): LessonE
     contentCount: Number(data.contentCount ?? 0),
     progress: Number(data.progress ?? 0),
     completed: data.completed === true,
+    // Existing enrollment documents predate lesson reviews, so a missing value
+    // must remain eligible rather than appearing as a completed review.
+    reviewedByLearner: data.reviewedByLearner === true,
     completedAt: (data.completedAt as LessonEnrollment['completedAt']) ?? null,
   } as LessonEnrollment;
 }
@@ -598,6 +601,7 @@ export async function enrollInLesson(user: User, lesson: Lesson): Promise<void> 
       completedContentIds: [],
       progress: 0,
       completed: false,
+      reviewedByLearner: false,
       completedAt: null,
       enrolledAt: serverTimestamp(),
       updatedAt: serverTimestamp(),

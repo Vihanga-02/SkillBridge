@@ -53,7 +53,7 @@ export function UserReviews({ userId }: Props) {
         <EmptyState
           icon="star-outline"
           title="No reviews yet"
-          message="Reviews from completed sessions will appear here."
+          message="Reviews from completed lessons and sessions will appear here."
         />
       ) : (
         <View style={styles.list}>

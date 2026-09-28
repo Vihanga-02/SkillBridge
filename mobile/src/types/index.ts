@@ -241,6 +241,8 @@ export type LessonEnrollment = {
   completedContentIds: string[];
   progress: number;
   completed: boolean;
+  /** Set by the review transaction after this learner reviews the completed lesson. */
+  reviewedByLearner: boolean;
   completedAt: Timestamp | null;
   enrolledAt: Timestamp | null;
   updatedAt: Timestamp | null;
@@ -314,8 +316,13 @@ export type Booking = {
 /** `reviews/{reviewId}` — owner: Member 4. */
 export type Review = {
   id: string;
-  bookingId: string;
-  sessionId: string;
+  /** Whether this feedback follows a completed session or a completed lesson. */
+  source: 'session' | 'lesson';
+  /** Present for reviews created from a session booking. */
+  bookingId?: string;
+  sessionId?: string;
+  /** Present for reviews created from a lesson enrollment. */
+  lessonId?: string;
   skillTag: SkillTag;
   fromUserId: string;
   fromUserName: string;

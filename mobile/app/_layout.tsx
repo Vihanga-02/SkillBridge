@@ -125,6 +125,7 @@ function RootNavigator() {
         <Stack.Screen name="booking/[id]" />
         <Stack.Screen name="booking/calendar" />
         <Stack.Screen name="review/[id]" />
+        <Stack.Screen name="review/lesson/[id]" />
       </Stack.Protected>
 
       <Stack.Screen name="+not-found" options={{ headerShown: true, title: 'Not found' }} />

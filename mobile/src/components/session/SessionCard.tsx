@@ -32,7 +32,8 @@ export function SessionCard({
   bookingAction = false,
   actionLoading = false,
 }: Props) {
-  const seatsLeft = Math.max(0, session.capacity - session.seatsTaken);
+  const bookedSeats = Math.max(0, Math.min(session.seatsTaken, session.capacity));
+  const seatsLeft = Math.max(0, session.capacity - bookedSeats);
   const seatWarning = seatsLeft <= 1;
 
   return (
@@ -97,9 +98,7 @@ export function SessionCard({
           color={seatWarning ? colors.danger : colors.inkMuted}
         />
         <Text style={[styles.seatText, seatWarning && styles.seatTextWarning]}>
-          {seatsLeft === 0
-            ? 'Session full'
-            : `${seatsLeft} ${seatsLeft === 1 ? 'seat' : 'seats'} left`}
+          {bookedSeats} / {session.capacity} booked
         </Text>
       </View>
 

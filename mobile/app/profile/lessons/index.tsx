@@ -245,25 +245,26 @@ export default function MyLessonsScreen() {
                             <Button
                               label={
                                 reviewSubmitted
-                                  ? 'Review submitted'
+                                  ? 'Open Lesson'
                                   : enrollment.completed
                                     ? 'Review Lesson'
                                     : 'Continue Learning'
                               }
                               icon={
                                 reviewSubmitted
-                                  ? 'checkmark-circle-outline'
+                                  ? 'eye-outline'
                                   : enrollment.completed
                                     ? 'star-outline'
                                     : 'play-outline'
                               }
                               variant={enrollment.completed ? 'secondary' : 'primary'}
-                              disabled={reviewSubmitted}
                               onPress={() =>
                                 router.push({
-                                  pathname: enrollment.completed
-                                    ? '/review/lesson/[id]'
-                                    : '/lesson/[id]',
+                                  // A submitted review must never trap the learner outside
+                                  // their completed lesson. They can still reopen its content.
+                                  pathname: reviewSubmitted || !enrollment.completed
+                                    ? '/lesson/[id]'
+                                    : '/review/lesson/[id]',
                                   params: { id: enrollment.lessonId },
                                 })
                               }

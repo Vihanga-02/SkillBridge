@@ -373,14 +373,17 @@ export async function listComments(
   };
 }
 
-/** Returns direct replies oldest-first, so each small conversation reads naturally. */
+/**
+ * Returns direct replies newest-first. This keeps a just-submitted reply in the
+ * first page instead of hiding it behind the first 30 older replies.
+ */
 export async function listCommentReplies(
   postId: string,
   parentCommentId: string,
   { pageSize = PAGE_SIZE.comments, cursor = null }: ListCommentsOptions = {}
 ): Promise<CommentPage> {
   const safePageSize = Math.max(1, Math.min(pageSize, PAGE_SIZE.comments));
-  const constraints: QueryConstraint[] = [orderBy('createdAt', 'asc')];
+  const constraints: QueryConstraint[] = [orderBy('createdAt', 'desc')];
   if (cursor) constraints.push(startAfter(cursor));
   constraints.push(limit(safePageSize + 1));
 

@@ -182,22 +182,25 @@ export default function LessonDetailsScreen() {
                   label={
                     enrollment.completed
                       ? enrollment.reviewedByLearner
-                        ? 'Review submitted'
+                        ? 'Open Lesson'
                         : 'Review Lesson'
                       : 'Continue Learning'
                   }
                   icon={
                     enrollment.completed
                       ? enrollment.reviewedByLearner
-                        ? 'checkmark-circle-outline'
+                        ? 'eye-outline'
                         : 'star-outline'
                       : 'play-outline'
                   }
                   variant={enrollment.completed ? 'secondary' : 'primary'}
-                  disabled={enrollment.completed && enrollment.reviewedByLearner}
                   onPress={() =>
                     router.push({
-                      pathname: enrollment.completed ? '/review/lesson/[id]' : '/lesson/[id]',
+                      // Keep the lesson accessible after the one-time review is submitted.
+                      pathname:
+                        enrollment.completed && !enrollment.reviewedByLearner
+                          ? '/review/lesson/[id]'
+                          : '/lesson/[id]',
                       params: { id: lesson.id },
                     })
                   }

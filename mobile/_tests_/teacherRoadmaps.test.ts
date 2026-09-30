@@ -39,7 +39,7 @@ it('uses completed flags, not average percentages, enrollment counts or unrelate
   const enrollments = new Map([['a', enrolled('a', 100)], ['b', enrolled('b', 60)], ['unrelated', enrolled('unrelated', 100)]]);
   const summary = roadmapProgress(roadmap(['a', 'b', 'c']), lessons, enrollments);
   expect(summary).toMatchObject({ progress: 33, completedCount: 1 });
-  expect(summary.items.map(row => row.status)).toEqual(['Completed', '60% In Progress', 'Not Enrolled']);
+  expect(summary.items.map(row => row.status)).toEqual(['Completed', '60% Complete', 'Not Enrolled']);
   expect(summary.next?.id).toBe('b');
   expect(roadmapProgress(roadmap(['a', 'b']), lessons, enrollments).progress).toBe(50);
   enrollments.set('b', enrolled('b', 100, false));
@@ -84,6 +84,12 @@ it('keeps all three levels at 0 then 33 percent after the first canonical lesson
   const after = learnerRoadmapHierarchy(rows, lessons, enrollments)[0];
   expect([after.progress.progress, after.skills[0].progress.progress, after.skills[0].journeys[0].summary.progress]).toEqual([33, 33, 33]);
   expect(after.skills[0].journeys[0].summary.next?.id).toBe('b');
+  enrollments.set('b', enrolled('b', 0));
+  const joined = learnerRoadmapHierarchy(rows, lessons, enrollments)[0];
+  expect([joined.progress.progress, joined.skills[0].progress.progress, joined.skills[0].journeys[0].summary.progress]).toEqual([33, 33, 33]);
+  enrollments.set('b', enrolled('b', 100));
+  const completed = learnerRoadmapHierarchy(rows, lessons, enrollments)[0];
+  expect([completed.progress.progress, completed.skills[0].progress.progress, completed.skills[0].journeys[0].summary.progress]).toEqual([67, 67, 67]);
 });
 it('excludes irrelevant roadmaps, missing references and unrelated lessons from hierarchy totals', () => {
   const enrollments = new Map([['a', enrolled('a', 100)], ['unrelated', enrolled('unrelated', 100)]]);

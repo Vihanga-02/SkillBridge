@@ -59,7 +59,7 @@ export function roadmapProgress(roadmap: TeacherRoadmap, lessons: Map<string, Le
     const completed = available && enrollment?.completed === true;
     const progress = completed ? 100 : Math.max(0, Math.min(99, Number(enrollment?.progress) || 0));
     const status = !available ? 'Unavailable' : completed ? 'Completed' : !enrollment ? 'Not Enrolled'
-      : progress > 0 ? `${progress}% In Progress` : 'Enrolled / Not Started';
+      : progress > 0 ? `${progress}% Complete` : 'Enrolled / Not Started';
     return { id, lesson, enrollment, available, completed, progress, status };
   });
   // Missing/unpublished/mismatched references cannot permanently block a path.

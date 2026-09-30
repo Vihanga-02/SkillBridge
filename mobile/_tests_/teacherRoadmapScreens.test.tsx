@@ -1,11 +1,11 @@
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native';
 import { router } from 'expo-router';
 import Form from '../app/profile/roadmaps/form';
 import List from '../app/profile/roadmaps/index';
 import Detail from '../app/profile/roadmaps/[id]';
 import MyLessons from '../app/profile/lessons/index';
 import { useAuth } from '@/hooks/useAuth';
-import { listLessonsByTeacher, listEnrollmentsByUser, listLessonsByIds } from '@/services/lessonService';
+import { enrollInLesson, getEnrollment, listLessonsByTeacher, listEnrollmentsByUser, listLessonsByIds } from '@/services/lessonService';
 import { getTeacherRoadmap, loadRoadmaps, loadRoadmapDetail, saveTeacherRoadmap } from '@/services/teacherRoadmapService';
 
 let mockParams: Record<string, string> = {};
@@ -17,7 +17,7 @@ jest.mock('expo-router', () => ({
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: jest.requireActual('react-native').View }));
 jest.mock('@/hooks/useAuth', () => ({ useAuth: jest.fn() }));
-jest.mock('@/services/lessonService', () => ({ listLessonsByTeacher: jest.fn(), listEnrollmentsByUser: jest.fn(), listLessonsByIds: jest.fn() }));
+jest.mock('@/services/lessonService', () => ({ enrollInLesson: jest.fn(), getEnrollment: jest.fn(), listLessonsByTeacher: jest.fn(), listEnrollmentsByUser: jest.fn(), listLessonsByIds: jest.fn() }));
 jest.mock('@/services/teacherRoadmapService', () => ({ getTeacherRoadmap: jest.fn(), loadRoadmaps: jest.fn(), loadRoadmapDetail: jest.fn(), saveTeacherRoadmap: jest.fn() }));
 const teacher = { uid: 'teacher', name: 'Teacher', role: 'teacher' };
 const lessons = [
@@ -27,8 +27,54 @@ const lessons = [
   { id: 'foreign', teacherId: 'other', careerGoalId: 'software-engineer', lessonName: 'Foreign JS', published: true, contents: [] },
 ];
 const roadmap = { id: 'path', teacherId: 'teacher', teacherName: 'Teacher', title: 'JS Path', skill: 'JavaScript', skillKey: 'javascript', careerGoalId: 'software-engineer', description: '', lessonIds: ['a', 'b'], revision: 0 };
+it.each([
+  ['learner', 'student'], ['both', 'student'], ['both', 'teacher'],
+])('%s (%s) enrolls directly, prevents repeated taps and continues without changing completion', async (role, uid) => {
+  const profile = { ...teacher, role, uid };
+  (useAuth as jest.Mock).mockReturnValue({ profile });
+  mockParams = { id: 'path', mode: 'learn' };
+  (loadRoadmapDetail as jest.Mock).mockResolvedValue({ roadmaps: [roadmap], lessons,
+    enrollments: [{ lessonId: 'a', completed: true, progress: 100 }] });
+  let finish!: () => void;
+  (enrollInLesson as jest.Mock).mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
+  const screen = await render(<Detail />);
+  await screen.findByText('Not Enrolled');
+  expect(screen.getByLabelText('Step 2: Current / Next')).toBeTruthy();
+  await fireEvent.press(screen.getAllByRole('button', { name: '+ Enroll' })[0]);
+  for (const button of screen.getAllByRole('button', { name: 'Enrolling...' })) {
+    expect(button.props.accessibilityState.disabled).toBe(true);
+    await fireEvent.press(button);
+  }
+  expect(enrollInLesson).toHaveBeenCalledTimes(1);
+  expect(enrollInLesson).toHaveBeenCalledWith(profile, lessons[1]);
+  await act(async () => finish());
+  expect(await screen.findByText('Enrolled / Not Started')).toBeTruthy();
+  expect(getEnrollment).toHaveBeenCalledWith(uid, 'b');
+  expect(screen.getByRole('progressbar', { name: 'Roadmap Progress' }).props.accessibilityValue.now).toBe(50);
+  expect(router.push).not.toHaveBeenCalled();
+  await fireEvent.press(within(screen.getByTestId('milestone-b')).getByRole('button', { name: 'Continue Learning' }));
+  expect(router.push).toHaveBeenCalledWith({ pathname: '/lesson/[id]', params: { id: 'b' } });
+});
+it('restores enrollment after failure and allows an upcoming lesson before the current lesson completes', async () => {
+  (useAuth as jest.Mock).mockReturnValue({ profile: { ...teacher, role: 'both' } });
+  mockParams = { id: 'path', mode: 'learn' };
+  (loadRoadmapDetail as jest.Mock).mockResolvedValue({ roadmaps: [roadmap], lessons,
+    enrollments: [{ lessonId: 'a', completed: false, progress: 0 }] });
+  (enrollInLesson as jest.Mock).mockRejectedValueOnce(new Error('Enrollment failed'));
+  const screen = await render(<Detail />);
+  await screen.findByText('Not Enrolled');
+  await fireEvent.press(screen.getByRole('button', { name: '+ Enroll' }));
+  expect(await screen.findByText('Enrollment failed')).toBeTruthy();
+  expect(screen.getByText('Not Enrolled')).toBeTruthy();
+  expect(getEnrollment).not.toHaveBeenCalled();
+  await fireEvent.press(screen.getByRole('button', { name: '+ Enroll' }));
+  await waitFor(() => expect(screen.queryByText('Not Enrolled')).toBeNull());
+  expect(screen.getByRole('progressbar', { name: 'Roadmap Progress' }).props.accessibilityValue.now).toBe(0);
+});
 beforeEach(() => {
   jest.clearAllMocks(); mockParams = {};
+  (enrollInLesson as jest.Mock).mockReset().mockResolvedValue(undefined);
+  (getEnrollment as jest.Mock).mockReset().mockImplementation(async (_uid, lessonId) => ({ lessonId, completed: false, progress: 0 }));
   (useAuth as jest.Mock).mockReturnValue({ profile: teacher });
   (listLessonsByTeacher as jest.Mock).mockResolvedValue(lessons);
   (listEnrollmentsByUser as jest.Mock).mockResolvedValue([]);
@@ -103,11 +149,13 @@ it('shows next lesson and distinguishes partial and not-enrolled lessons without
     enrollments: [{ lessonId: 'a', completed: false, progress: 60 }] });
   const screen = await render(<Detail />);
   expect(await screen.findByText('Next: JS Basics')).toBeTruthy();
-  expect(screen.getByText('60% In Progress')).toBeTruthy();
+  expect(screen.getByText('60% Complete')).toBeTruthy();
   expect(screen.getByText('Not Enrolled')).toBeTruthy();
   expect(screen.getByText('0 of 2 lessons completed')).toBeTruthy();
-  await fireEvent.press(screen.getByRole('button', { name: 'View Lesson' }));
-  expect(router.push).toHaveBeenCalledWith({ pathname: '/lesson/details/[id]', params: { id: 'b' } });
+  await fireEvent.press(screen.getByRole('button', { name: '+ Enroll' }));
+  expect(await screen.findByText('Enrolled / Not Started')).toBeTruthy();
+  expect(enrollInLesson).toHaveBeenCalledWith(expect.objectContaining({ role: 'both' }), lessons[1]);
+  expect(router.push).not.toHaveBeenCalled();
 });
 it('shows a completed roadmap and gracefully renders missing references', async () => {
   mockParams = { id: 'path', mode: 'learn' };
@@ -128,6 +176,7 @@ it('Both retains Created by Me and Enrolled Lessons alongside both roadmap entry
 });
 
 it('renders completed, current and upcoming milestones in teacher order with the correct actions', async () => {
+  (useAuth as jest.Mock).mockReturnValue({ profile: { ...teacher, role: 'both' } });
   mockParams = { id: 'path', mode: 'learn' };
   const third = { ...lessons[0], id: 'c', lessonName: 'JS Projects' };
   (loadRoadmapDetail as jest.Mock).mockResolvedValue({ roadmaps: [{ ...roadmap, lessonIds: ['a', 'b', 'c'] }], lessons: [...lessons, third],
@@ -141,8 +190,7 @@ it('renders completed, current and upcoming milestones in teacher order with the
   expect(router.push).toHaveBeenLastCalledWith({ pathname: '/lesson/[id]', params: { id: 'a' } });
   await fireEvent.press(screen.getAllByRole('button', { name: 'Continue Learning' })[0]);
   expect(router.push).toHaveBeenLastCalledWith({ pathname: '/lesson/[id]', params: { id: 'b' } });
-  await fireEvent.press(screen.getByRole('button', { name: 'View Lesson' }));
-  expect(router.push).toHaveBeenLastCalledWith({ pathname: '/lesson/details/[id]', params: { id: 'c' } });
+  expect(screen.getByRole('button', { name: '+ Enroll' })).toBeTruthy();
 });
 it('shows the learner empty state without teacher creation controls', async () => {
   mockParams = { mode: 'learn' };

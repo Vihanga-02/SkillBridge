@@ -7,7 +7,7 @@ import type { learnerRoadmapHierarchy, roadmapProgress } from '@/utils/teacherRo
 
 type Summary = Pick<ReturnType<typeof roadmapProgress>, 'total' | 'completedCount' | 'completed' | 'progress'>;
 type Milestone = ReturnType<typeof roadmapProgress>['items'][number];
-export const milestoneAction = (item: Milestone) => item.completed ? 'Review Lesson' : item.enrollment ? 'Continue Learning' : 'View Lesson';
+export const milestoneAction = (item: Milestone) => item.completed ? 'Review Lesson' : item.enrollment ? 'Continue Learning' : '+ Enroll';
 
 export function JourneyProgress({ label, summary, dark = false }: { label: string; summary: Summary; dark?: boolean }) {
   return <View style={s.progress}>
@@ -75,14 +75,16 @@ export function LearnerRoadmapHome({ goals, onOpen }: {
   </View>;
 }
 
-export function VisualLessonJourney({ summary, onOpen }: {
+export function VisualLessonJourney({ summary, onOpen, enrollingIds }: {
   summary: ReturnType<typeof roadmapProgress>; onOpen: (item: Milestone) => void;
+  enrollingIds: ReadonlySet<string>;
 }) {
   return <View style={s.journey}>
     {summary.next ? <View style={s.continueCard}>
       <Text style={s.title}>Continue your journey</Text>
       <Text style={s.strong}>Next: {summary.next.lesson?.lessonName}</Text>
-      <Button label={milestoneAction(summary.next)} onPress={() => onOpen(summary.next!)} />
+      <Button label={enrollingIds.has(summary.next.id) ? 'Enrolling...' : milestoneAction(summary.next)}
+        disabled={enrollingIds.has(summary.next.id)} onPress={() => onOpen(summary.next!)} />
     </View> : null}
     <Text style={s.bookend}>START</Text>
     {summary.items.map((item, index) => {
@@ -103,7 +105,8 @@ export function VisualLessonJourney({ summary, onOpen }: {
               accessibilityValue={{ min: 0, max: 100, now: item.progress }}>
               <View style={[s.fill, { width: `${item.progress}%` }]} />
             </View> : null}
-          {item.available ? <Button label={milestoneAction(item)} variant={current ? 'primary' : 'secondary'} onPress={() => onOpen(item)} /> : null}
+          {item.available ? <Button label={enrollingIds.has(item.id) ? 'Enrolling...' : milestoneAction(item)}
+            disabled={enrollingIds.has(item.id)} variant={current ? 'primary' : 'secondary'} onPress={() => onOpen(item)} /> : null}
         </View>
       </View>;
     })}

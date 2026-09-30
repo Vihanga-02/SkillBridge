@@ -11,7 +11,7 @@ jest.mock('firebase/firestore', () => ({
 }));
 import { getDocsFromServer, getDocs, getDoc, runTransaction, updateDoc, writeBatch } from 'firebase/firestore';
 import { auth } from '@/firebase/config';
-import { createLesson, deleteLesson, enrollInLesson, getLesson, listLessonsByIds, updateLesson, toggleLessonContentDone } from '@/services/lessonService';
+import { createLesson, deleteLesson, enrollInLesson, getLesson, listLessonsByIds, updateLesson, toggleLessonContentDone, submitLessonAnswer, refreshLessonProgress, markLessonCompleted, getEnrollment } from '@/services/lessonService';
 import { deleteFile } from '@/utils/storage';
 import type { Lesson, User } from '@/types';
 
@@ -220,6 +220,8 @@ it('editing an enrolled lesson preserves its count without reading other enrollm
 });
 it('completion progress does not change total enrollment count', async () => {
   await enrollInLesson(learner(), lesson);
+  (auth as any).currentUser = { uid: 'learner' };
+  put('users/learner', { role: 'learner' });
   await toggleLessonContentDone(learner(), lesson, 'pdf');
   expect(records.get('lessons/lesson')?.enrollmentCount).toBe(1);
   expect(records.get('enrollments/learner_lesson')?.progress).toBe(25);
@@ -266,4 +268,144 @@ it('does not trust a numeric aggregate without the migration version marker', as
   put('lessons/lesson', data);
   expect((await getLesson('lesson'))?.enrollmentCount).toBeUndefined();
   await expect(enrollInLesson(learner(), lesson)).rejects.toThrow('being upgraded');
+});
+
+const question = (id: string, answerIndex = 1) => ({ id, q: 'What is Git?', options: ['Database', 'Version control', 'Video', 'Design'], answerIndex });
+const validInput = (quiz: any[], quizRevision = 0) => ({ ...input, careerGoalId: require('@/constants/careerGoals').CAREER_GOALS[0].tag, quiz, quizRevision });
+async function startLearning(uid = 'learner', role = 'learner', count = 3) {
+  put('lessons/lesson', { ...records.get('lessons/lesson'), contents: [
+    { id: 'video', type: 'youtube', videoId: 'dQw4w9WgXcQ' }, { id: 'pdf', type: 'pdf' },
+  ], quiz: Array.from({ length: count }, (_, i) => question('q' + i)), completeCount: 0 });
+  (auth as any).currentUser = { uid };
+  put('users/' + uid, { role });
+  const user = learner(uid, role);
+  await enrollInLesson(user, lesson);
+  return user;
+}
+it.each(['teacher', 'both'])('%s creates ten, edits stable IDs, deletes and replaces questions without changing enrollments', async role => {
+  put('users/teacher', { role });
+  const user = { ...teacher, role } as User;
+  const questions = Array.from({ length: 10 }, (_, i) => question('q' + i));
+  const id = await createLesson(user, validInput(questions));
+  expect((await getLesson(id))?.quiz).toHaveLength(10);
+  await expect(updateLesson(user, id, validInput([...questions, question('q10')]))).rejects.toThrow('Maximum 10');
+  questions[3] = { ...questions[3], q: 'Edited question' };
+  await updateLesson(user, id, validInput(questions));
+  expect((await getLesson(id))?.quiz[3]).toMatchObject({ id: 'q3', q: 'Edited question' });
+  await updateLesson(user, id, validInput(questions.filter(q => q.id !== 'q6'), 1));
+  expect((await getLesson(id))?.quiz).toHaveLength(9);
+  await updateLesson(user, id, validInput([...questions.filter(q => q.id !== 'q6'), question('new')], 2));
+  expect((await getLesson(id))?.quiz).toHaveLength(10);
+  expect(records.get('lessons/' + id)?.enrollmentCount).toBe(0);
+});
+it('concurrent saves at nine questions cannot exceed ten or silently overwrite a question', async () => {
+  const questions = Array.from({ length: 9 }, (_, i) => question('q' + i));
+  const id = await createLesson(teacher, validInput(questions));
+  const results = await Promise.allSettled([
+    updateLesson(teacher, id, validInput([...questions, question('a')])),
+    updateLesson(teacher, id, validInput([...questions, question('b')])),
+  ]);
+  expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+  expect((await getLesson(id))?.quiz).toHaveLength(10);
+});
+it('lesson-only edits preserve existing quiz', async () => {
+  const id = await createLesson(teacher, validInput([question('stable')]));
+  await updateLesson(teacher, id, { ...input, careerGoalId: require('@/constants/careerGoals').CAREER_GOALS[0].tag });
+  expect((await getLesson(id))?.quiz[0].id).toBe('stable');
+});
+it('rejects learner-only, foreign-owner and stale-role question management', async () => {
+  await expect(updateLesson(learner('teacher'), 'lesson', validInput([question('q')]))).rejects.toThrow('Only teachers');
+  put('lessons/lesson', { ...records.get('lessons/lesson'), teacherId: 'someone-else' });
+  await expect(updateLesson(teacher, 'lesson', validInput([question('q')]))).rejects.toThrow('Only the teacher');
+  put('lessons/lesson', { ...records.get('lessons/lesson'), teacherId: 'teacher' });
+  put('users/teacher', { role: 'learner' });
+  await expect(updateLesson(teacher, 'lesson', validInput([question('q')]))).rejects.toThrow('Only teachers');
+});
+it.each([['learner', 'learner'], ['teacher', 'both']])('%s/%s completes 1 video + 1 PDF + 3 questions only after every activity', async (uid, role) => {
+  const user = await startLearning(uid, role);
+  await expect(markLessonCompleted(user, lesson)).rejects.toThrow('Complete all');
+  expect((await toggleLessonContentDone(user, lesson, 'video')).progress).toBe(20);
+  expect((await toggleLessonContentDone(user, lesson, 'pdf')).progress).toBe(40);
+  expect((await submitLessonAnswer(user, 'lesson', 'q0', 0)).progress).toBe(60);
+  expect((await submitLessonAnswer(user, 'lesson', 'q1', 1)).completed).toBe(false);
+  const result = await submitLessonAnswer(user, 'lesson', 'q2', 1);
+  expect(result).toMatchObject({ completed: true, progress: 100 });
+  expect(result.quizAnswers?.q0).toMatchObject({ submitted: true, correct: false, selectedIndex: 0, answerIndex: 1 });
+  expect(records.get('lessonProgress/' + uid + '_lesson')).toMatchObject({ quizScore: 67, quizAttempts: 3, status: 'completed' });
+  expect(await getEnrollment(uid, 'lesson')).toMatchObject({ progress: 100, quizAnswers: result.quizAnswers });
+  await refreshLessonProgress(user, 'lesson');
+  expect(records.get('lessons/lesson')).toMatchObject({ enrollmentCount: 1, completeCount: 1 });
+  expect((await toggleLessonContentDone(user, lesson, 'video')).completed).toBe(false);
+  expect(records.get('lessons/lesson')?.completeCount).toBe(0);
+});
+it('all wrong answers complete the quiz but an unfinished video blocks lesson completion', async () => {
+  const user = await startLearning();
+  await toggleLessonContentDone(user, lesson, 'pdf');
+  for (let i = 0; i < 3; i++) await submitLessonAnswer(user, 'lesson', 'q' + i, 0);
+  expect(await refreshLessonProgress(user, 'lesson')).toMatchObject({ completed: false, progress: 80 });
+  expect(await toggleLessonContentDone(user, lesson, 'video')).toMatchObject({ completed: true, progress: 100 });
+  expect(records.get('lessonProgress/learner_lesson')?.quizScore).toBe(0);
+});
+it('zero MCQs require only the current materials', async () => {
+  const user = await startLearning('learner', 'learner', 0);
+  await toggleLessonContentDone(user, lesson, 'video');
+  expect(await toggleLessonContentDone(user, lesson, 'pdf')).toMatchObject({ completed: true, progress: 100 });
+});
+it('concurrent answers persist without lost submissions or repeated completion awards', async () => {
+  const user = await startLearning();
+  await toggleLessonContentDone(user, lesson, 'video');
+  await toggleLessonContentDone(user, lesson, 'pdf');
+  await Promise.all([0, 1, 2].map(i => submitLessonAnswer(user, 'lesson', 'q' + i, 0)));
+  await Promise.all([0, 1, 2].map(i => submitLessonAnswer(user, 'lesson', 'q' + i, 1)));
+  expect(await getEnrollment(user.uid, 'lesson')).toMatchObject({ completed: true, progress: 100 });
+  expect(records.get('lessonProgress/learner_lesson')?.quizScore).toBe(0);
+  expect(records.get('lessons/lesson')?.completeCount).toBe(1);
+});
+it('edited questions retain historical feedback; deleted questions stop blocking and added questions reopen completion', async () => {
+  const user = await startLearning();
+  await toggleLessonContentDone(user, lesson, 'video');
+  await toggleLessonContentDone(user, lesson, 'pdf');
+  await submitLessonAnswer(user, 'lesson', 'q0', 1);
+  await submitLessonAnswer(user, 'lesson', 'q1', 0);
+  put('lessons/lesson', { ...records.get('lessons/lesson'), quiz: [question('q0', 0), question('q1')] });
+  const result = await refreshLessonProgress(user, 'lesson');
+  expect(result).toMatchObject({ completed: true, progress: 100 });
+  expect(result.quizAnswers?.q0).toMatchObject({ correct: true, answerIndex: 1 });
+  put('lessons/lesson', { ...records.get('lessons/lesson'), quiz: [question('q0', 0), question('q1'), question('new')] });
+  expect(await refreshLessonProgress(user, 'lesson')).toMatchObject({ completed: false, progress: 80 });
+  expect(records.get('lessons/lesson')?.enrollmentCount).toBe(1);
+});
+it('requires enrollment even for owners, rejects teacher-only learning and invalid answers', async () => {
+  const user = await startLearning();
+  await expect(submitLessonAnswer(user, 'lesson', 'q0', -1)).rejects.toThrow('select one');
+  await expect(submitLessonAnswer(user, 'lesson', 'deleted', 0)).rejects.toThrow('no longer part');
+  (auth as any).currentUser = { uid: 'teacher' };
+  await expect(submitLessonAnswer(teacher, 'lesson', 'q0', 0)).rejects.toThrow('learner');
+  put('users/teacher', { role: 'both' });
+  await expect(submitLessonAnswer(learner('teacher', 'both'), 'lesson', 'q0', 0)).rejects.toThrow('Enroll');
+});
+
+it('rejects submitting an answer against a question revision the learner has not seen', async () => {
+  const user = await startLearning();
+  put('lessons/lesson', { ...records.get('lessons/lesson'), quizRevision: 1 });
+  await expect(submitLessonAnswer(user, 'lesson', 'q0', 0, 0)).rejects.toThrow('questions have changed');
+  expect((await getEnrollment(user.uid, 'lesson'))?.quizAnswers).toEqual({});
+});
+it('BOTH creator manages questions after self-enrollment without altering attempts, materials, or enrollment count', async () => {
+  const user = { ...teacher, role: 'both' } as User;
+  put('users/teacher', { role: 'both' });
+  const id = await createLesson(user, validInput([question('q0'), question('q1')]));
+  const created = (await getLesson(id))!;
+  await enrollInLesson(user, created);
+  await toggleLessonContentDone(user, created, created.contents[0].id);
+  await submitLessonAnswer(user, id, 'q0', 1);
+  const stored = (await getEnrollment(user.uid, id))!;
+  await updateLesson(user, id, { ...validInput([{ ...question('q0', 0), q: 'Edited' }]),
+    contents: created.contents.map(item => ({ ...item, type: 'youtube' as const, url: 'https://youtu.be/dQw4w9WgXcQ' })) });
+  const updated = (await getLesson(id))!;
+  expect(updated.contents).toEqual(created.contents);
+  expect(updated.enrollmentCount).toBe(1);
+  expect((await getEnrollment(user.uid, id))?.quizAnswers).toEqual(stored.quizAnswers);
+  expect(await refreshLessonProgress(user, id)).toMatchObject({ completed: true, progress: 100 });
+  expect(records.get('lessonProgress/teacher_' + id)?.quizScore).toBe(100);
 });

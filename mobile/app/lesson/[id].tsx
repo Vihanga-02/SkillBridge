@@ -1,3 +1,4 @@
+import { KnowledgeCheck } from '@/components/lesson/KnowledgeCheck';
 import { EnrollmentCount } from '@/components/lesson/EnrollmentCount';
 import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
@@ -20,6 +21,8 @@ import {
   getEnrollment,
   getLesson,
   toggleLessonContentDone,
+  refreshLessonProgress,
+  submitLessonAnswer,
   youtubeEmbedUrl,
 } from '@/services/lessonService';
 import type { Lesson, LessonContent, LessonEnrollment } from '@/types';
@@ -55,7 +58,9 @@ export default function LessonDetailScreen() {
         if (!active) return;
         if (!row || row.published === false) setError('That lesson is not available.');
         else {
-          const nextEnrollment = await getEnrollment(profile.uid, row.id);
+          const storedEnrollment = await getEnrollment(profile.uid, row.id);
+          const nextEnrollment = storedEnrollment && profile.role !== 'teacher'
+            ? await refreshLessonProgress(profile, row.id) : null;
           if (!active) return;
           if (row.teacherId !== profile.uid && !nextEnrollment) {
             setAccessDenied(true);
@@ -79,7 +84,7 @@ export default function LessonDetailScreen() {
   }, [id, profile]));
 
   async function toggleContentDone(contentId: string) {
-    if (!profile || !lesson || !enrollment) return;
+    if (!profile || !lesson || !enrollment || savingContentId) return;
     setSavingContentId(contentId);
     setError(null);
     try {
@@ -91,6 +96,26 @@ export default function LessonDetailScreen() {
     } finally {
       setSavingContentId(null);
     }
+  }
+
+  async function submitAnswer(questionId: string, selectedIndex: number) {
+    if (!profile || !lesson || !enrollment || savingContentId) return;
+    setSavingContentId(questionId); setError(null);
+    try {
+      const next = await submitLessonAnswer(profile, lesson.id, questionId, selectedIndex, lesson.quizRevision ?? 0);
+      setEnrollment(next); setCompleted(next.completed);
+    } catch (e) {
+      setError(errorMessage(e));
+      // Refresh stale questions without submitting an answer against unseen options.
+      try {
+        const row = await getLesson(lesson.id);
+        if (row) {
+          const next = await refreshLessonProgress(profile, row.id);
+          setLesson(row); setEnrollment(next); setCompleted(next.completed);
+        }
+      } catch { /* Keep the original error and allow retry after connectivity returns. */ }
+    }
+    finally { setSavingContentId(null); }
   }
 
   if (loading) {
@@ -139,12 +164,14 @@ export default function LessonDetailScreen() {
                 item={item}
                 index={index}
                 done={!!enrollment?.completedContentIds.includes(item.id)}
-                saving={savingContentId === item.id}
+                saving={savingContentId !== null}
                 onToggleDone={
                   enrollment ? () => void toggleContentDone(item.id) : undefined
                 }
               />
             ))}
+
+            {enrollment ? <KnowledgeCheck key={`${lesson.id}-${lesson.quizRevision ?? 0}`} lesson={lesson} enrollment={enrollment} onSubmit={submitAnswer} busy={savingContentId !== null} /> : null}
 
             {enrollment ? (
               completed ? (

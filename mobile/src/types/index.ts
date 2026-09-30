@@ -252,6 +252,22 @@ export type LessonEnrollment = {
   updatedAt: Timestamp | null;
 };
 
+/** Manual teacher-created paths; separate from any personalized/AI roadmap data. */
+export type TeacherRoadmap = {
+  id: string;
+  teacherId: string;
+  teacherName: string;
+  title: string;
+  careerGoalId: CareerGoalTag;
+  skill: string;
+  skillKey: string;
+  description: string;
+  lessonIds: string[];
+  revision: number;
+  createdAt: Timestamp | null;
+  updatedAt: Timestamp | null;
+};
+
 export type SessionMode = 'online' | 'in_person';
 export type SessionType = 'one_to_one' | 'group';
 export type SessionStatus = 'open' | 'full' | 'cancelled' | 'completed';

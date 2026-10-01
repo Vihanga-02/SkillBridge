@@ -27,6 +27,12 @@ import {
   validateCommunityImageUpload,
   type CommunityImageUpload,
 } from '@/services/communityMedia';
+import {
+  communityStatsRef,
+  contributionCreatedFields,
+  contributionRemovedFields,
+  type ContributionKind,
+} from '@/services/leaderboardService';
 import type {
   Comment,
   CommentReaction,
@@ -81,7 +87,9 @@ export const COMMENT_REACTIONS = [
   { value: 'celebrate', label: 'Celebrate', emoji: '🎉' },
 ] as const satisfies readonly { value: CommentReaction; label: string; emoji: string }[];
 
-const COMMENT_DELETE_BATCH_SIZE = 450;
+// Each page also writes one leaderboard decrement per distinct author, so a
+// page of 200 deletes stays under Firestore's 500-operation batch limit.
+const COMMENT_DELETE_BATCH_SIZE = 200;
 
 const toPost = (snapshot: QueryDocumentSnapshot<DocumentData>): Post =>
   ({ ...snapshot.data(), id: snapshot.id }) as Post;
@@ -168,6 +176,7 @@ export async function createPost(author: PostAuthor, input: CreatePostInput): Pr
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
+      transaction.set(communityStatsRef(author.uid), contributionCreatedFields('post', author), { merge: true });
     });
   } catch (error) {
     if (upload) await deleteFile(upload.path).catch(() => undefined);
@@ -298,6 +307,7 @@ export async function addComment(postId: string, author: PostAuthor, rawText: st
       updatedAt: serverTimestamp(),
     });
     transaction.update(postRef, { commentCount: increment(1) });
+    transaction.set(communityStatsRef(author.uid), contributionCreatedFields('comment', author), { merge: true });
   });
 
   return commentRef.id;
@@ -346,6 +356,7 @@ export async function addCommentReply(
       updatedAt: serverTimestamp(),
     });
     transaction.update(postRef, { commentCount: increment(1) });
+    transaction.set(communityStatsRef(author.uid), contributionCreatedFields('reply', author), { merge: true });
   });
 
   return replyRef.id;
@@ -439,6 +450,28 @@ export async function toggleCommentReaction(
   });
 }
 
+/**
+ * Takes the deleted items' points back from their authors in the same batch
+ * as the deletes, so a retried post deletion never subtracts twice.
+ */
+function removeContributionsInBatch(
+  batch: ReturnType<typeof writeBatch>,
+  docs: QueryDocumentSnapshot<DocumentData>[],
+  kind: ContributionKind
+): void {
+  const countsByAuthor = new Map<string, number>();
+  for (const item of docs) {
+    const authorId = item.data().authorId;
+    if (typeof authorId === 'string' && authorId) {
+      countsByAuthor.set(authorId, (countsByAuthor.get(authorId) ?? 0) + 1);
+    }
+  }
+
+  countsByAuthor.forEach((count, authorId) => {
+    batch.set(communityStatsRef(authorId), contributionRemovedFields(authorId, kind, count), { merge: true });
+  });
+}
+
 async function deleteCommentReplies(postRef: ReturnType<typeof doc>, commentId: string): Promise<void> {
   const repliesCol = collection(postRef, 'comments', commentId, 'replies');
 
@@ -448,6 +481,7 @@ async function deleteCommentReplies(postRef: ReturnType<typeof doc>, commentId: 
 
     const batch = writeBatch(db);
     snapshot.docs.forEach((reply) => batch.delete(reply.ref));
+    removeContributionsInBatch(batch, snapshot.docs, 'reply');
     await batch.commit();
   }
 }
@@ -494,6 +528,7 @@ export async function deletePost(postId: string, authorId: string): Promise<void
 
       const batch = writeBatch(db);
       snapshot.docs.forEach((comment) => batch.delete(comment.ref));
+      removeContributionsInBatch(batch, snapshot.docs, 'comment');
       await batch.commit();
     }
 
@@ -505,6 +540,7 @@ export async function deletePost(postId: string, authorId: string): Promise<void
       }
 
       transaction.delete(postRef);
+      transaction.set(communityStatsRef(authorId), contributionRemovedFields(authorId, 'post'), { merge: true });
     });
 
     // Storage has no cross-service transaction with Firestore. The document is

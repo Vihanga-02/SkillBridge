@@ -409,11 +409,12 @@ export type Comment = {
 };
 
 /**
- * `communityStats/{uid}` — server-owned, denormalized ranking read model.
+ * `communityStats/{uid}` — denormalized ranking read model.
  *
- * Only the Cloud Functions leaderboard workers write this document. Keeping the
- * counters outside `users/{uid}` prevents a client from forging a rank and
- * avoids loading every profile just to render the top contributors.
+ * `postService` updates it in the same transaction/batch that creates or
+ * deletes the post, comment or reply, so the score can never drift from the
+ * content. Keeping the counters outside `users/{uid}` avoids loading every
+ * profile just to render the top contributors.
  */
 export type CommunityStats = {
   userId: string;

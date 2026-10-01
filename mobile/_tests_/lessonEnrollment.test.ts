@@ -11,7 +11,7 @@ jest.mock('firebase/firestore', () => ({
 }));
 import { getDocsFromServer, getDocs, getDoc, runTransaction, updateDoc, writeBatch } from 'firebase/firestore';
 import { auth } from '@/firebase/config';
-import { createLesson, deleteLesson, enrollInLesson, getLesson, listLessonsByIds, updateLesson, toggleLessonContentDone, submitLessonAnswer, refreshLessonProgress, markLessonCompleted, getEnrollment } from '@/services/lessonService';
+import { createLesson, deleteLesson, enrollInLesson, getLesson, listLessonsByIds, updateLesson, toggleLessonContentDone, submitLessonAnswer, retryLessonQuiz, refreshLessonProgress, markLessonCompleted, getEnrollment } from '@/services/lessonService';
 import { deleteFile } from '@/utils/storage';
 import type { Lesson, User } from '@/types';
 
@@ -313,6 +313,14 @@ it('lesson-only edits preserve existing quiz', async () => {
   await updateLesson(teacher, id, { ...input, careerGoalId: require('@/constants/careerGoals').CAREER_GOALS[0].tag });
   expect((await getLesson(id))?.quiz[0].id).toBe('stable');
 });
+it('does not advance the quiz revision when a form save leaves the quiz unchanged', async () => {
+  const quiz = [question('stable')];
+  const id = await createLesson(teacher, validInput(quiz));
+  await updateLesson(teacher, id, { ...validInput(quiz), description: 'Updated description' });
+  expect(await getLesson(id)).toMatchObject({ description: 'Updated description', quizRevision: 0 });
+  await updateLesson(teacher, id, validInput([{ ...quiz[0], q: 'Changed question' }]));
+  expect((await getLesson(id))?.quizRevision).toBe(1);
+});
 it('rejects learner-only, foreign-owner and stale-role question management', async () => {
   await expect(updateLesson(learner('teacher'), 'lesson', validInput([question('q')]))).rejects.toThrow('Only teachers');
   put('lessons/lesson', { ...records.get('lessons/lesson'), teacherId: 'someone-else' });
@@ -338,13 +346,19 @@ it.each([['learner', 'learner'], ['teacher', 'both']])('%s/%s completes 1 video 
   expect((await toggleLessonContentDone(user, lesson, 'video')).completed).toBe(false);
   expect(records.get('lessons/lesson')?.completeCount).toBe(0);
 });
-it('all wrong answers complete the quiz but an unfinished video blocks lesson completion', async () => {
+it('all wrong answers fail the quiz and a retry can earn lesson completion', async () => {
   const user = await startLearning();
   await toggleLessonContentDone(user, lesson, 'pdf');
   for (let i = 0; i < 3; i++) await submitLessonAnswer(user, 'lesson', 'q' + i, 0);
   expect(await refreshLessonProgress(user, 'lesson')).toMatchObject({ completed: false, progress: 80 });
-  expect(await toggleLessonContentDone(user, lesson, 'video')).toMatchObject({ completed: true, progress: 100 });
+  expect(await toggleLessonContentDone(user, lesson, 'video')).toMatchObject({ completed: false, progress: 99 });
   expect(records.get('lessonProgress/learner_lesson')?.quizScore).toBe(0);
+  expect(records.get('lessons/lesson')?.completeCount).toBe(0);
+  expect(await retryLessonQuiz(user, 'lesson')).toMatchObject({ completed: false, progress: 40, quizAnswers: {} });
+  await submitLessonAnswer(user, 'lesson', 'q0', 1);
+  await submitLessonAnswer(user, 'lesson', 'q1', 1);
+  expect(await submitLessonAnswer(user, 'lesson', 'q2', 0)).toMatchObject({ completed: true, progress: 100 });
+  expect(records.get('lessons/lesson')?.completeCount).toBe(1);
 });
 it('zero MCQs require only the current materials', async () => {
   const user = await startLearning('learner', 'learner', 0);
@@ -355,10 +369,10 @@ it('concurrent answers persist without lost submissions or repeated completion a
   const user = await startLearning();
   await toggleLessonContentDone(user, lesson, 'video');
   await toggleLessonContentDone(user, lesson, 'pdf');
-  await Promise.all([0, 1, 2].map(i => submitLessonAnswer(user, 'lesson', 'q' + i, 0)));
-  await Promise.all([0, 1, 2].map(i => submitLessonAnswer(user, 'lesson', 'q' + i, 1)));
+  await Promise.all([0, 1, 2].map(i => submitLessonAnswer(user, 'lesson', 'q' + i, i === 0 ? 0 : 1)));
+  await Promise.all([0, 1, 2].map(i => submitLessonAnswer(user, 'lesson', 'q' + i, i === 0 ? 1 : 0)));
   expect(await getEnrollment(user.uid, 'lesson')).toMatchObject({ completed: true, progress: 100 });
-  expect(records.get('lessonProgress/learner_lesson')?.quizScore).toBe(0);
+  expect(records.get('lessonProgress/learner_lesson')?.quizScore).toBe(67);
   expect(records.get('lessons/lesson')?.completeCount).toBe(1);
 });
 it('edited questions retain historical feedback; deleted questions stop blocking and added questions reopen completion', async () => {
@@ -366,7 +380,7 @@ it('edited questions retain historical feedback; deleted questions stop blocking
   await toggleLessonContentDone(user, lesson, 'video');
   await toggleLessonContentDone(user, lesson, 'pdf');
   await submitLessonAnswer(user, 'lesson', 'q0', 1);
-  await submitLessonAnswer(user, 'lesson', 'q1', 0);
+  await submitLessonAnswer(user, 'lesson', 'q1', 1);
   put('lessons/lesson', { ...records.get('lessons/lesson'), quiz: [question('q0', 0), question('q1')] });
   const result = await refreshLessonProgress(user, 'lesson');
   expect(result).toMatchObject({ completed: true, progress: 100 });

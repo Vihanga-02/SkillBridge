@@ -72,7 +72,6 @@ export default function CreateSessionScreen() {
   const [level, setLevel] = useState<Level>('beginner');
   const [sessionType, setSessionType] = useState<SessionType>('group');
   const [mode, setMode] = useState<SessionMode>('online');
-  const [meetingLink, setMeetingLink] = useState('');
   const [locationText, setLocationText] = useState('');
   const [date, setDate] = useState('');
   const [time, setTime] = useState('18:00');
@@ -108,7 +107,6 @@ export default function CreateSessionScreen() {
         setLevel(session.level);
         setSessionType(session.type);
         setMode(session.mode);
-        setMeetingLink(session.meetingLink);
         setLocationText(session.locationText);
         setDate(
           `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`
@@ -177,7 +175,6 @@ export default function CreateSessionScreen() {
         level,
         type: sessionType,
         mode,
-        meetingLink,
         locationText,
         date,
         time,
@@ -252,13 +249,9 @@ export default function CreateSessionScreen() {
           <ChipSelect label="Mode" options={MODE_OPTIONS} value={mode} onChange={setMode} />
 
           {mode === 'online' ? (
-            <Input
-              label="Meeting link"
-              value={meetingLink}
-              onChangeText={setMeetingLink}
-              placeholder="https://meet.google.com/…"
-              autoCapitalize="none"
-              keyboardType="url"
+            <Notice
+              tone="info"
+              message="A private in-app video room will be created automatically. Confirmed learners can join from their booking."
             />
           ) : (
             <Input

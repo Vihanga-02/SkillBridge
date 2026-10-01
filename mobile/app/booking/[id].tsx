@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -175,11 +174,16 @@ export default function BookingDetailScreen() {
         ) : null}
 
         <View style={styles.actions}>
-          {booking.status === 'confirmed' && booking.mode === 'online' && booking.meetingLink ? (
+          {booking.status === 'confirmed' && booking.mode === 'online' ? (
             <Button
-              label="Join Meeting"
+              label="Join in-app meeting"
               icon="videocam-outline"
-              onPress={() => void Linking.openURL(booking.meetingLink)}
+              onPress={() =>
+                router.push({
+                  pathname: '/session/meeting/[id]',
+                  params: { id: booking.sessionId },
+                })
+              }
             />
           ) : null}
 

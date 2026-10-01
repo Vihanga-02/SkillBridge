@@ -10,10 +10,25 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.skillbridge.app"
+      "bundleIdentifier": "com.skillbridge.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "SkillBridge uses your camera during in-app video sessions.",
+        "NSMicrophoneUsageDescription": "SkillBridge uses your microphone during in-app video sessions."
+      },
+      "bitcode": false
     },
     "android": {
       "package": "com.skillbridge.app",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.INTERNET",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WAKE_LOCK",
+        "android.permission.BLUETOOTH"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4F1",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -46,11 +61,21 @@
           "cameraPermission": "SkillBridge needs camera access so you can photograph a certificate."
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-dev-client",
+      "@livekit/react-native-expo-plugin",
+      "@config-plugins/react-native-webrtc"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "f4be90aa-8daa-40fe-9e4c-356bd28679fa"
+      }
+    },
+    "owner": "amaya_hiruni"
   }
 }

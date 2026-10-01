@@ -44,7 +44,6 @@ export type CreateSessionInput = {
   level: Level;
   type: SessionType;
   mode: SessionMode;
-  meetingLink: string;
   locationText: string;
   /** Local date 'YYYY-MM-DD' */
   date: string;
@@ -53,8 +52,6 @@ export type CreateSessionInput = {
   durationMins: number;
   capacity: number;
 };
-
-export type EditableSession = Session & { meetingLink: string };
 
 const sessionsCol = collection(db, 'sessions');
 
@@ -72,21 +69,10 @@ export async function getSession(sessionId: string): Promise<Session | null> {
   return snapshot.exists() ? ({ ...snapshot.data(), id: snapshot.id } as Session) : null;
 }
 
-/** Loads the private meeting link only for the owner-facing edit form. */
-export async function getEditableSession(sessionId: string): Promise<EditableSession | null> {
-  const [sessionSnapshot, secretSnapshot] = await Promise.all([
-    getDoc(doc(db, 'sessions', sessionId)),
-    getDoc(doc(db, 'sessionSecrets', sessionId)),
-  ]);
+export async function getEditableSession(sessionId: string): Promise<Session | null> {
+  const sessionSnapshot = await getDoc(doc(db, 'sessions', sessionId));
   if (!sessionSnapshot.exists()) return null;
-  const session = { ...sessionSnapshot.data(), id: sessionSnapshot.id } as Session;
-  return {
-    ...session,
-    meetingLink:
-      session.mode === 'online'
-        ? String(secretSnapshot.data()?.meetingLink ?? session.meetingLink ?? '')
-        : '',
-  };
+  return { ...sessionSnapshot.data(), id: sessionSnapshot.id } as Session;
 }
 
 async function sessionHasBookingRecord(sessionId: string): Promise<boolean> {
@@ -212,12 +198,6 @@ export async function createSession(teacher: User, input: CreateSessionInput): P
   }
   if (capacity > 50) throw new Error('A session can have at most 50 seats.');
 
-  if (input.mode === 'online' && !input.meetingLink.trim()) {
-    throw new Error('Online sessions need a meeting link.');
-  }
-  if (input.mode === 'online' && !/^https:\/\//i.test(input.meetingLink.trim())) {
-    throw new Error('Meeting links must start with https://.');
-  }
   if (input.mode === 'in_person' && !input.locationText.trim()) {
     throw new Error('In-person sessions need a location.');
   }
@@ -254,16 +234,6 @@ export async function createSession(teacher: User, input: CreateSessionInput): P
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-
-  if (input.mode === 'online') {
-    batch.set(doc(db, 'sessionSecrets', ref.id), {
-      sessionId: ref.id,
-      teacherId: teacher.uid,
-      meetingLink: input.meetingLink.trim(),
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-  }
 
   await batch.commit();
 
@@ -304,12 +274,6 @@ export async function updateSession(
     throw new Error('Group sessions need at least 2 seats.');
   }
   if (capacity > 50) throw new Error('A session can have at most 50 seats.');
-  if (input.mode === 'online' && !input.meetingLink.trim()) {
-    throw new Error('Online sessions need a meeting link.');
-  }
-  if (input.mode === 'online' && !/^https:\/\//i.test(input.meetingLink.trim())) {
-    throw new Error('Meeting links must start with https://.');
-  }
   if (input.mode === 'in_person' && !input.locationText.trim()) {
     throw new Error('In-person sessions need a location.');
   }
@@ -343,17 +307,9 @@ export async function updateSession(
       updatedAt: serverTimestamp(),
     });
 
-    const secretRef = doc(db, 'sessionSecrets', sessionId);
-    if (input.mode === 'online') {
-      tx.set(secretRef, {
-        sessionId,
-        teacherId: teacher.uid,
-        meetingLink: input.meetingLink.trim(),
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
-    } else {
-      tx.delete(secretRef);
-    }
+    // LiveKit rooms are created on demand from the session id. No meeting URL
+    // or provider secret is ever stored in a client-readable document.
+    tx.delete(doc(db, 'sessionSecrets', sessionId));
   });
 }
 

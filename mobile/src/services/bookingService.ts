@@ -178,25 +178,16 @@ export async function approveBooking(bookingId: string, teacherId: string): Prom
     }
 
     const sessionRef = doc(db, 'sessions', booking.sessionId);
-    const secretRef = doc(db, 'sessionSecrets', booking.sessionId);
-    const [sessionSnap, secretSnap] = await Promise.all([
-      tx.get(sessionRef),
-      tx.get(secretRef),
-    ]);
+    const sessionSnap = await tx.get(sessionRef);
     if (!sessionSnap.exists()) throw new Error('The session no longer exists.');
 
     const session = sessionSnap.data() as Session;
     if (session.status === 'cancelled' || session.status === 'completed') {
       throw new Error('This session is no longer accepting bookings.');
     }
-    const meetingLink =
-      booking.mode === 'online'
-        ? ((secretSnap.data()?.meetingLink as string | undefined) ?? session.meetingLink ?? '')
-        : '';
-
     tx.update(bookingRef, {
       status: 'confirmed' satisfies BookingStatus,
-      meetingLink,
+      meetingLink: '',
       updatedAt: serverTimestamp(),
     });
   });

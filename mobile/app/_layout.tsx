@@ -1,4 +1,5 @@
 import { Stack } from 'expo-router';
+import { registerGlobals } from '@livekit/react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
@@ -13,6 +14,8 @@ import { LoadingState } from '@/components/ui/LoadingState';
 import { colors, spacing } from '@/constants/theme';
 import { AuthProvider } from '@/context/AuthContext';
 import { useAuth } from '@/hooks/useAuth';
+
+registerGlobals();
 
 /**
  * Every guard failure falls back to `index`, which re-reads the auth state and
@@ -120,6 +123,7 @@ function RootNavigator() {
         <Stack.Screen name="session/create" />
         <Stack.Screen name="session/[id]" />
         <Stack.Screen name="session/teacher/[id]" />
+        <Stack.Screen name="session/meeting/[id]" />
         <Stack.Screen name="booking/[id]" />
         <Stack.Screen name="booking/calendar" />
         <Stack.Screen name="review/[id]" />

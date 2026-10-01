@@ -22,6 +22,8 @@ jest.mock('react-native-webview', () => ({ WebView: () => null }));
 jest.mock('expo-web-browser', () => ({ openBrowserAsync: jest.fn() }));
 jest.mock('@/hooks/useAuth', () => ({ useAuth: jest.fn() }));
 jest.mock('@/services/lessonService', () => ({
+  refreshLessonProgress: jest.fn(),
+  retryLessonQuiz: jest.fn(),
   getLesson: jest.fn(), listLessons: jest.fn(), listLessonsByTeacher: jest.fn(), listLessonsByIds: jest.fn(),
   listEnrollmentsByUser: jest.fn(), listEnrollmentIds: jest.fn(), getEnrollment: jest.fn(),
   enrollInLesson: jest.fn(), deleteLesson: jest.fn(), subscribeToLessonsByTeacher: jest.fn(),
@@ -52,6 +54,7 @@ beforeEach(() => {
   (lessons.listEnrollmentIds as jest.Mock).mockResolvedValue(new Set(['course']));
   (lessons.listEnrollmentsByUser as jest.Mock).mockResolvedValue([enrollment]);
   (lessons.getEnrollment as jest.Mock).mockResolvedValue(enrollment);
+  (lessons.refreshLessonProgress as jest.Mock).mockResolvedValue(enrollment);
   (lessons.subscribeToLessonsByTeacher as jest.Mock).mockImplementation((_id, next) => { next([{ ...course }]); return () => {}; });
   (subscribeToUser as jest.Mock).mockImplementation((_id, next) => { next(owner); return () => {}; });
 });
@@ -70,8 +73,14 @@ it('Enrolled Lessons includes the BOTH creator and separates total from personal
   expect(screen.getByRole('button', { name: 'Edit' }).props.accessibilityState.disabled).toBe(false);
   await fireEvent.press(screen.getByRole('tab', { name: 'Enrolled Lessons' }));
   expect(await screen.findByText('3 learners enrolled')).toBeTruthy();
-  expect(screen.getByText('40%')).toBeTruthy();
+  expect(screen.getByText('0%')).toBeTruthy(); // Current empty lesson must not show a stale cached percentage.
   expect(screen.getByText('Both Test Course')).toBeTruthy();
+});
+it('displays a stored enrollment when progress reconciliation fails', async () => {
+  (lessons.refreshLessonProgress as jest.Mock).mockRejectedValue(new Error('offline'));
+  const screen = await render(<LessonScreen />);
+  expect(await screen.findByText('Both Test Course')).toBeTruthy();
+  expect(screen.queryByText('offline')).toBeNull();
 });
 it('teacher public profile displays the same count', async () => {
   (subscribeToUser as jest.Mock).mockImplementation((_id, next) => { next({ ...owner, role: 'teacher' }); return () => {}; });

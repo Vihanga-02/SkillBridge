@@ -1,3 +1,4 @@
+import { lessonCompletion } from '@/utils/lessonProgress';
 import { DeleteLessonButton } from '@/components/lesson/DeleteLessonButton';
 import { EnrollmentCount } from '@/components/lesson/EnrollmentCount';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,7 +16,7 @@ import { Notice } from '@/components/ui/Notice';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { colors, radius, sizes, spacing, type } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
-import { deleteLesson, listEnrollmentsByUser, listLessonsByTeacher, listLessonsByIds } from '@/services/lessonService';
+import { deleteLesson, listEnrollmentsByUser, listLessonsByTeacher, listLessonsByIds, refreshLessonProgress } from '@/services/lessonService';
 import type { Lesson, LessonEnrollment } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
 
@@ -47,8 +48,17 @@ export default function MyLessonsScreen() {
         canLearn ? listEnrollmentsByUser(profile.uid) : Promise.resolve([]),
       ]);
       setCreatedLessons(createdRows);
-      setEnrollments(enrolledRows);
-      setEnrolledLessons(await listLessonsByIds(enrolledRows.map((row) => row.lessonId)));
+      const currentLessons = await listLessonsByIds(enrolledRows.map((row) => row.lessonId));
+      const currentById = new Map(currentLessons.map(row => [row.id, row]));
+      const reconciled = await Promise.all(enrolledRows.map(async row => {
+        const lesson = currentById.get(row.lessonId);
+        if (!lesson || lesson.deleting || !lesson.published) return row;
+        const current = lessonCompletion(lesson, row);
+        return current.progress !== row.progress || current.completed !== row.completed
+          ? refreshLessonProgress(profile, row.lessonId) : row;
+      }));
+      setEnrollments(reconciled);
+      setEnrolledLessons(currentLessons);
     } catch (loadError) {
       setError(errorMessage(loadError));
     } finally {
@@ -234,9 +244,10 @@ export default function MyLessonsScreen() {
                   <View style={styles.list}>
                     {enrollments.map((enrollment) => {
                       const lesson = enrolledLessonById.get(enrollment.lessonId);
+                      const status = lesson ? lessonCompletion(lesson, enrollment) : enrollment;
                       const contentCount = lesson?.contents.length ?? enrollment.contentCount;
                       const reviewSubmitted =
-                        enrollment.completed && enrollment.reviewedByLearner;
+                        status.completed && enrollment.reviewedByLearner;
 
                       return (
                         <Card key={enrollment.id}>
@@ -249,30 +260,30 @@ export default function MyLessonsScreen() {
                             </Text>
                             <EnrollmentCount count={lesson?.enrollmentCount} />
                             <ProgressBar
-                              progress={enrollment.progress}
-                              completed={enrollment.completed}
+                              progress={status.progress}
+                              completed={status.completed}
                             />
                             <Button
                               label={
                                 reviewSubmitted
                                   ? 'Open Lesson'
-                                  : enrollment.completed
+                                  : status.completed
                                     ? 'Review Lesson'
                                     : 'Continue Learning'
                               }
                               icon={
                                 reviewSubmitted
                                   ? 'eye-outline'
-                                  : enrollment.completed
+                                  : status.completed
                                     ? 'star-outline'
                                     : 'play-outline'
                               }
-                              variant={enrollment.completed ? 'secondary' : 'primary'}
+                              variant={status.completed ? 'secondary' : 'primary'}
                               onPress={() =>
                                 router.push({
                                   // A submitted review must never trap the learner outside
                                   // their completed lesson. They can still reopen its content.
-                                  pathname: reviewSubmitted || !enrollment.completed
+                                  pathname: reviewSubmitted || !status.completed
                                     ? '/lesson/[id]'
                                     : '/review/lesson/[id]',
                                   params: { id: enrollment.lessonId },

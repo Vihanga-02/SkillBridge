@@ -1,3 +1,4 @@
+import { lessonCompletion } from '@/utils/lessonProgress';
 import { EnrollmentCount } from '@/components/lesson/EnrollmentCount';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -141,6 +142,9 @@ export default function LessonDetailsScreen() {
                   {pdfCount > 0 ? (
                     <MaterialRow icon="document-text-outline" count={pdfCount} label="PDF document" />
                   ) : null}
+                  {lesson.quiz?.length > 0 ? (
+                    <MaterialRow icon="help-circle-outline" count={lesson.quiz.length} label="MCQ question" />
+                  ) : null}
                   <Text style={styles.protectedHint}>
                     Enroll to open videos, PDFs, quizzes, flashcards, and progress tracking.
                   </Text>
@@ -176,7 +180,7 @@ export default function LessonDetailsScreen() {
               <View style={styles.actions}>
                 <Notice
                   tone="success"
-                  message={enrollment.completed ? '✓ Completed' : '✓ Enrolled'}
+                  message={lessonCompletion(lesson, enrollment).completed ? '✓ Completed' : '✓ Enrolled'}
                 />
                 <Button
                   label={

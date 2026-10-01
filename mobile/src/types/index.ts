@@ -154,7 +154,18 @@ export type LessonFormat = 'text' | 'flashcards' | 'video' | 'pdf';
 
 export type Flashcard = { front: string; back: string };
 
-export type QuizQuestion = { q: string; options: string[]; answerIndex: number };
+export type QuizQuestion = { id?: string; q: string; options: string[]; answerIndex: number };
+
+export type LessonQuizAnswer = {
+  questionId: string;
+  selectedIndex: number;
+  correct: boolean;
+  submitted: true;
+  submittedAt: number;
+  question: string;
+  options: string[];
+  answerIndex: number;
+};
 
 export type LessonContent =
   | {
@@ -209,6 +220,7 @@ export type Lesson = {
   thumbnailUrl: string;
   durationMins: number;
   quiz: QuizQuestion[];
+  quizRevision?: number;
   quizSource: 'gemini' | 'manual';
   viewCount: number;
   completeCount: number;
@@ -245,6 +257,7 @@ export type LessonEnrollment = {
   careerGoalName: string;
   contentCount: number;
   completedContentIds: string[];
+  quizAnswers?: Record<string, LessonQuizAnswer>;
   progress: number;
   completed: boolean;
   /** Set by the review transaction after this learner reviews the completed lesson. */

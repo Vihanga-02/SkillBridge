@@ -20,7 +20,8 @@ import { careerGoalByTag, type CareerGoalTag } from '@/constants/careerGoals';
 import { FILE_LIMITS } from '@/constants/config';
 import { skillByTag } from '@/constants/skills';
 import { auth, db } from '@/firebase/config';
-import type { Lesson, LessonContent, LessonEnrollment, User } from '@/types';
+import type { Lesson, LessonContent, LessonEnrollment, QuizQuestion, User } from '@/types';
+import { lessonCompletion, questionId, validateQuiz } from '@/utils/lessonProgress';
 import { deleteFile, sanitizeStorageName, uploadFile } from '@/utils/storage';
 import { nonNegativeCount } from '@/utils/counts';
 
@@ -54,6 +55,8 @@ export type LessonInput = {
   description: string;
   careerGoalId: CareerGoalTag | null;
   contents: LessonContentInput[];
+  quiz?: QuizQuestion[];
+  quizRevision?: number;
 };
 
 const lessonsCol = collection(db, 'lessons');
@@ -88,10 +91,10 @@ function normalizeContents(value: unknown): LessonContent[] {
 
   const contents: LessonContent[] = [];
 
-  for (const item of value) {
+  for (const [index, item] of value.entries()) {
     if (!item || typeof item !== 'object') continue;
     const data = item as Record<string, unknown>;
-    const id = String(data.id ?? doc(collection(db, '_ids')).id);
+    const id = String(data.id ?? `legacy-content-${index}`);
     const itemType = data.type;
 
     if (itemType === 'youtube') {
@@ -154,12 +157,24 @@ function normalizeLesson(data: Record<string, unknown>): Lesson {
         ''
     ),
     contents: normalizeContents(data.contents),
+    quiz: Array.isArray(data.quiz) ? data.quiz.map((q: QuizQuestion, i: number) => ({ ...q, id: questionId(q, i) })) : [],
+    quizRevision: Number(data.quizRevision ?? 0),
     published: data.published !== false,
     ownerId: String(data.ownerId ?? teacherId),
     ownerName: String(data.ownerName ?? data.teacherName ?? ''),
     ownerAvatarUrl: String(data.ownerAvatarUrl ?? data.teacherAvatarUrl ?? ''),
     title,
   } as Lesson;
+}
+
+function quizzesEqual(left: QuizQuestion[], right: QuizQuestion[]): boolean {
+  return left.length === right.length && left.every((question, index) => {
+    const other = right[index];
+    return question.id === other.id && question.q === other.q &&
+      question.answerIndex === other.answerIndex &&
+      question.options.length === other.options.length &&
+      question.options.every((option, optionIndex) => option === other.options[optionIndex]);
+  });
 }
 
 export function extractYouTubeVideoId(value: string): string | null {
@@ -201,6 +216,7 @@ export function youtubeEmbedUrl(value: string): string | null {
 }
 
 export function validateLesson(input: LessonInput): void {
+  if (input.quiz) validateQuiz(input.quiz);
   const name = input.lessonName.trim();
   if (name.length < 3 || name.length > 120) {
     throw new Error('Lesson name must be between 3 and 120 characters.');
@@ -317,7 +333,6 @@ function basePayload(teacher: User, input: LessonInput) {
     mediaSizeBytes: 0,
     thumbnailUrl: '',
     durationMins: Math.max(5, input.contents.length * 5),
-    quiz: [],
     quizSource: 'manual',
     updatedAt: serverTimestamp(),
   };
@@ -395,14 +410,18 @@ async function buildContents(
 }
 
 export async function createLesson(teacher: User, input: LessonInput): Promise<string> {
-  if (teacher.role === 'learner') throw new Error('Only teachers can create lessons.');
+  if (auth.currentUser?.uid !== teacher.uid || !['teacher', 'both'].includes(teacher.role)) throw new Error('Only teachers can create lessons.');
   validateLesson(input);
+  const profile = await getDoc(doc(db, 'users', teacher.uid));
+  if (!['teacher', 'both'].includes(profile.data()?.role)) throw new Error('Only teachers can create lessons.');
 
   const ref = doc(lessonsCol);
   const batch = writeBatch(db);
   batch.set(ref, {
     id: ref.id,
     ...basePayload(teacher, input),
+    quiz: validateQuiz(input.quiz ?? []),
+    quizRevision: 0,
     published: false,
     contents: [],
     enrollmentCount: 0,
@@ -441,7 +460,7 @@ export async function createLesson(teacher: User, input: LessonInput): Promise<s
 }
 
 export async function updateLesson(teacher: User, lessonId: string, input: LessonInput): Promise<void> {
-  if (teacher.role === 'learner') throw new Error('Only teachers can edit lessons.');
+  if (auth.currentUser?.uid !== teacher.uid || !['teacher', 'both'].includes(teacher.role)) throw new Error('Only teachers can edit lessons.');
   validateLesson(input);
 
   const existing = await getLesson(lessonId);
@@ -463,7 +482,10 @@ export async function updateLesson(teacher: User, lessonId: string, input: Lesso
 
     const lessonRef = doc(db, 'lessons', lessonId);
     await runTransaction(db, async (transaction) => {
-      const currentSnapshot = await transaction.get(lessonRef);
+      const [currentSnapshot, profile] = await Promise.all([
+        transaction.get(lessonRef), transaction.get(doc(db, 'users', teacher.uid)),
+      ]);
+      if (!['teacher', 'both'].includes(profile.data()?.role)) throw new Error('Only teachers can edit lessons.');
       if (!currentSnapshot.exists()) throw new Error('That lesson no longer exists.');
       if ((currentSnapshot.data().teacherId ?? currentSnapshot.data().ownerId) !== teacher.uid) {
         throw new Error('Only the teacher who created this lesson can edit it.');
@@ -471,7 +493,15 @@ export async function updateLesson(teacher: User, lessonId: string, input: Lesso
       if (currentSnapshot.data().deleting === true) {
         throw new Error('This lesson is being deleted and can no longer be edited.');
       }
+      const currentLesson = normalizeLesson({ ...currentSnapshot.data(), id: currentSnapshot.id });
+      const currentQuizRevision = currentLesson.quizRevision ?? 0;
+      const nextQuiz = input.quiz ? validateQuiz(input.quiz) : undefined;
+      const quizChanged = nextQuiz !== undefined && !quizzesEqual(nextQuiz, currentLesson.quiz);
+      if (quizChanged && currentQuizRevision !== (input.quizRevision ?? 0)) {
+        throw new Error('Questions changed in another session. Reopen this lesson before saving.');
+      }
       transaction.update(lessonRef, {
+        ...(quizChanged ? { quiz: nextQuiz, quizRevision: currentQuizRevision + 1 } : {}),
         ...basePayload(teacher, input),
         contents: nextContents,
         updatedAt: serverTimestamp(),
@@ -672,6 +702,7 @@ export async function enrollInLesson(user: User, lesson: Lesson): Promise<void> 
       careerGoalName: currentLesson.careerGoalName,
       contentCount: currentLesson.contents.length,
       completedContentIds: [],
+      quizAnswers: {},
       progress: 0,
       completed: false,
       reviewedByLearner: false,
@@ -697,151 +728,102 @@ export async function enrollInLesson(user: User, lesson: Lesson): Promise<void> 
   });
 }
 
-function calculateProgress(completedIds: string[], lesson: Lesson): number {
-  const currentContentIds = new Set(lesson.contents.map((item) => item.id));
-  const validCompleted = completedIds.filter((id) => currentContentIds.has(id));
-  if (lesson.contents.length === 0) return 0;
-  return Math.round((validCompleted.length / lesson.contents.length) * 100);
-}
+type ProgressAction = { type: 'toggle'; contentId: string } |
+  { type: 'answer'; questionId: string; selectedIndex: number; quizRevision?: number } |
+  { type: 'retryQuiz' } | { type: 'refresh' } | { type: 'complete' };
 
-export async function toggleLessonContentDone(
-  user: User,
-  lesson: Lesson,
-  contentId: string
-): Promise<LessonEnrollment> {
-  const enrollmentRef = doc(db, 'enrollments', enrollmentIdFor(user.uid, lesson.id));
-  const progressRef = doc(db, 'lessonProgress', `${user.uid}_${lesson.id}`);
-  const lessonRef = doc(db, 'lessons', lesson.id);
+async function updateLearningProgress(user: User, lessonId: string, action: ProgressAction): Promise<LessonEnrollment> {
+  if (auth.currentUser?.uid !== user.uid || !['learner', 'both'].includes(user.role)) {
+    throw new Error('Sign in with a learner or Teach & learn account to update progress.');
+  }
+  const enrollmentRef = doc(db, 'enrollments', enrollmentIdFor(user.uid, lessonId));
+  const progressRef = doc(db, 'lessonProgress', enrollmentIdFor(user.uid, lessonId));
+  const lessonRef = doc(db, 'lessons', lessonId);
   const userRef = doc(db, 'users', user.uid);
-  return runTransaction(db, async (transaction) => {
-    const [enrollmentSnapshot, lessonSnapshot, userSnapshot] = await Promise.all([
-      transaction.get(enrollmentRef),
-      transaction.get(lessonRef),
-      transaction.get(userRef),
+  return runTransaction(db, async transaction => {
+    const [enrollmentSnapshot, lessonSnapshot, profile] = await Promise.all([
+      transaction.get(enrollmentRef), transaction.get(lessonRef), transaction.get(userRef),
     ]);
-    if (!enrollmentSnapshot.exists()) {
-      throw new Error('Enroll in this lesson before updating progress.');
-    }
+    if (!['learner', 'both'].includes(profile.data()?.role)) throw new Error('Only learners can update lesson progress.');
+    if (!enrollmentSnapshot.exists()) throw new Error('Enroll in this lesson before updating progress.');
     if (!lessonSnapshot.exists() || lessonSnapshot.data().published !== true || lessonSnapshot.data().deleting === true) {
       throw new Error('This lesson is no longer available.');
     }
-
-    const currentLesson = normalizeLesson({ ...lessonSnapshot.data(), id: lessonSnapshot.id });
-    const validContentIds = new Set(currentLesson.contents.map((item) => item.id));
-    if (!validContentIds.has(contentId)) {
-      throw new Error('That content item is no longer part of this lesson.');
-    }
-
+    const lesson = normalizeLesson({ ...lessonSnapshot.data(), id: lessonId });
     const enrollment = normalizeEnrollment(enrollmentSnapshot.data(), enrollmentSnapshot.id);
-    const completedSet = new Set(
-      enrollment.completedContentIds.filter((id) => validContentIds.has(id))
-    );
-    if (completedSet.has(contentId)) completedSet.delete(contentId);
-    else completedSet.add(contentId);
-
-    const completedContentIds = [...completedSet];
-    const progress = calculateProgress(completedContentIds, currentLesson);
-    const completed = currentLesson.contents.length > 0 && progress === 100;
-    const completionDelta = Number(completed) - Number(enrollment.completed);
-
-    transaction.update(enrollmentRef, {
-      contentCount: currentLesson.contents.length,
-      completedContentIds,
-      progress,
-      completed,
-      completedAt: completed ? serverTimestamp() : null,
-      updatedAt: serverTimestamp(),
-    });
-    transaction.set(progressRef, {
-      id: progressRef.id,
-      userId: user.uid,
-      lessonId: lesson.id,
-      lessonTitle: currentLesson.lessonName,
-      skillTag: currentLesson.skillTag,
-      status: completed ? 'completed' : 'in_progress',
-      lastCardIndex: Math.max(0, currentLesson.contents.findIndex((item) => item.id === contentId)),
-      quizScore: 0,
-      quizAttempts: 0,
-      minutesSpent: Math.max(0, completedContentIds.length * 5),
-      completedAt: completed ? serverTimestamp() : null,
-      updatedAt: serverTimestamp(),
-    }, { merge: true });
-
-    if (completionDelta !== 0) {
-      transaction.update(lessonRef, {
-        completeCount: Math.max(0, nonNegativeCount(lessonSnapshot.data().completeCount) + completionDelta),
-        updatedAt: serverTimestamp(),
-      });
-      transaction.update(userRef, {
-        'stats.lessonsCompleted': Math.max(0, nonNegativeCount(userSnapshot.data()?.stats?.lessonsCompleted) + completionDelta),
-      });
+    const completedIds = new Set(enrollment.completedContentIds);
+    const quizAnswers = { ...enrollment.quizAnswers };
+    if (action.type === 'toggle') {
+      if (!lesson.contents.some(item => item.id === action.contentId)) throw new Error('That content item is no longer part of this lesson.');
+      if (completedIds.has(action.contentId)) completedIds.delete(action.contentId);
+      else completedIds.add(action.contentId);
     }
-
-    return {
-      ...enrollment,
-      contentCount: currentLesson.contents.length,
-      completedContentIds,
-      progress,
-      completed,
-      completedAt: completed ? enrollment.completedAt : null,
-      updatedAt: enrollment.updatedAt,
-    };
-  });
-}
-
-export async function markLessonCompleted(user: User, lesson: Lesson): Promise<void> {
-  const progressRef = doc(db, 'lessonProgress', `${user.uid}_${lesson.id}`);
-  const enrollmentRef = doc(db, 'enrollments', enrollmentIdFor(user.uid, lesson.id));
-  const lessonRef = doc(db, 'lessons', lesson.id);
-  const userRef = doc(db, 'users', user.uid);
-
-  await runTransaction(db, async (transaction) => {
-    const [enrollmentSnapshot, lessonSnapshot, userSnapshot] = await Promise.all([
-      transaction.get(enrollmentRef),
-      transaction.get(lessonRef),
-      transaction.get(userRef),
-    ]);
-    if (!lessonSnapshot.exists() || lessonSnapshot.data().published !== true || lessonSnapshot.data().deleting === true) {
-      throw new Error('This lesson is no longer available.');
+    if (action.type === 'answer') {
+      if (action.quizRevision !== undefined && action.quizRevision !== lesson.quizRevision) {
+        throw new Error('The questions have changed. Please review them and submit again.');
+      }
+      const question = lesson.quiz.find(q => q.id === action.questionId);
+      if (!question) throw new Error('That question is no longer part of this lesson.');
+      if (!Number.isInteger(action.selectedIndex) || action.selectedIndex < 0 || action.selectedIndex >= question.options.length) {
+        throw new Error('Please select one answer.');
+      }
+      // First submission wins, including concurrent duplicate taps and retries.
+      if (!quizAnswers[action.questionId]?.submitted) quizAnswers[action.questionId] = {
+        questionId: action.questionId, selectedIndex: action.selectedIndex,
+        correct: action.selectedIndex === question.answerIndex, submitted: true, submittedAt: Date.now(),
+        question: question.q, options: [...question.options], answerIndex: question.answerIndex,
+      };
     }
-    const currentLesson = normalizeLesson({ ...lessonSnapshot.data(), id: lessonSnapshot.id });
-    if (!enrollmentSnapshot.exists() && currentLesson.teacherId !== user.uid) {
-      throw new Error('Enroll in this lesson before updating progress.');
-    }
-    const wasCompleted = enrollmentSnapshot.exists() && enrollmentSnapshot.data().completed === true;
-
-    transaction.set(progressRef, {
-      id: progressRef.id,
-      userId: user.uid,
-      lessonId: currentLesson.id,
-      lessonTitle: currentLesson.lessonName,
-      skillTag: currentLesson.skillTag,
-      status: 'completed',
-      lastCardIndex: Math.max(0, currentLesson.contents.length - 1),
-      quizScore: 0,
-      quizAttempts: 0,
-      minutesSpent: Math.max(5, currentLesson.contents.length * 5),
-      completedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    }, { merge: true });
-    if (enrollmentSnapshot.exists()) {
-      transaction.update(enrollmentRef, {
-        contentCount: currentLesson.contents.length,
-        completedContentIds: currentLesson.contents.map((item) => item.id),
-        progress: 100,
-        completed: true,
-        completedAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-    }
-    if (!wasCompleted) {
-      transaction.update(lessonRef, {
-        completeCount: nonNegativeCount(lessonSnapshot.data().completeCount) + 1,
-        updatedAt: serverTimestamp(),
-      });
-      if (enrollmentSnapshot.exists()) {
-        transaction.update(userRef, { 'stats.lessonsCompleted': nonNegativeCount(userSnapshot.data()?.stats?.lessonsCompleted) + 1 });
+    if (action.type === 'retryQuiz') {
+      for (const [index, question] of lesson.quiz.entries()) {
+        delete quizAnswers[questionId(question, index)];
       }
     }
+    const completedContentIds = [...completedIds];
+    const result = lessonCompletion(lesson, { completedContentIds, quizAnswers });
+    const requirementsKey = JSON.stringify([lesson.contents.map(item => item.id), lesson.quiz.map(q => q.id)]);
+    if (action.type === 'complete' && !result.completed) {
+      throw new Error('Complete all materials and pass the knowledge check first.');
+    }
+    const delta = Number(result.completed) - Number(enrollment.completed);
+    if (action.type === 'refresh' && enrollment.progress === result.progress && enrollment.completed === result.completed &&
+        enrollmentSnapshot.data().requirementsKey === requirementsKey) return enrollment;
+    const completedAt = result.completed ? enrollment.completedAt ?? serverTimestamp() : null;
+    transaction.update(enrollmentRef, {
+      completedContentIds, quizAnswers, contentCount: lesson.contents.length, progress: result.progress, requirementsKey,
+      completed: result.completed, completedAt, updatedAt: serverTimestamp(),
+    });
+    transaction.set(progressRef, {
+      id: progressRef.id, userId: user.uid, lessonId, lessonTitle: lesson.lessonName, skillTag: lesson.skillTag,
+      status: result.completed ? 'completed' : 'in_progress',
+      ...(action.type === 'toggle' ? { lastCardIndex: lesson.contents.findIndex(item => item.id === action.contentId) } : {}),
+      quizScore: result.quizScore, quizAttempts: result.submitted, quizAnswers,
+      completedContentIds, progress: result.progress,
+      minutesSpent: lesson.contents.filter(item => completedIds.has(item.id)).length * 5,
+      completedAt, updatedAt: serverTimestamp(),
+    }, { merge: true });
+    if (delta !== 0) {
+      transaction.update(lessonRef, {
+        completeCount: Math.max(0, nonNegativeCount(lessonSnapshot.data().completeCount) + delta),
+      });
+      transaction.update(userRef, {
+        'stats.lessonsCompleted': Math.max(0, nonNegativeCount(profile.data()?.stats?.lessonsCompleted) + delta),
+      });
+    }
+    return { ...enrollment, completedContentIds, quizAnswers, contentCount: lesson.contents.length,
+      progress: result.progress, completed: result.completed,
+      completedAt: result.completed ? enrollment.completedAt : null };
   });
+}
+
+export const toggleLessonContentDone = (user: User, lesson: Lesson, contentId: string) =>
+  updateLearningProgress(user, lesson.id, { type: 'toggle', contentId });
+export const submitLessonAnswer = (user: User, lessonId: string, questionId: string, selectedIndex: number, quizRevision?: number) =>
+  updateLearningProgress(user, lessonId, { type: 'answer', questionId, selectedIndex, quizRevision });
+export const retryLessonQuiz = (user: User, lessonId: string) =>
+  updateLearningProgress(user, lessonId, { type: 'retryQuiz' });
+export const refreshLessonProgress = (user: User, lessonId: string) =>
+  updateLearningProgress(user, lessonId, { type: 'refresh' });
+export async function markLessonCompleted(user: User, lesson: Lesson): Promise<void> {
+  await updateLearningProgress(user, lesson.id, { type: 'complete' });
 }

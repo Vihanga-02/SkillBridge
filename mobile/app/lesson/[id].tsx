@@ -1,3 +1,4 @@
+import { KnowledgeCheck } from '@/components/lesson/KnowledgeCheck';
 import { EnrollmentCount } from '@/components/lesson/EnrollmentCount';
 import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
@@ -19,11 +20,15 @@ import {
   extractYouTubeVideoId,
   getEnrollment,
   getLesson,
+  retryLessonQuiz,
   toggleLessonContentDone,
+  refreshLessonProgress,
+  submitLessonAnswer,
   youtubeEmbedUrl,
 } from '@/services/lessonService';
 import type { Lesson, LessonContent, LessonEnrollment } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
+import { lessonCompletion } from '@/utils/lessonProgress';
 
 const YOUTUBE_PLAYER_ORIGIN = process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN
   ? `https://${process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN}`
@@ -55,15 +60,27 @@ export default function LessonDetailScreen() {
         if (!active) return;
         if (!row || row.published === false) setError('That lesson is not available.');
         else {
-          const nextEnrollment = await getEnrollment(profile.uid, row.id);
+          const storedEnrollment = await getEnrollment(profile.uid, row.id);
           if (!active) return;
-          if (row.teacherId !== profile.uid && !nextEnrollment) {
+          if (row.teacherId !== profile.uid && !storedEnrollment) {
             setAccessDenied(true);
             setError('Enroll in this lesson to access the learning materials.');
           } else {
             setLesson(row);
-            setEnrollment(nextEnrollment);
-            setCompleted(nextEnrollment?.completed ?? false);
+            setEnrollment(storedEnrollment);
+            setCompleted(storedEnrollment ? lessonCompletion(row, storedEnrollment).completed : false);
+            setLoading(false);
+            if (storedEnrollment && profile.role !== 'teacher') {
+              try {
+                const reconciled = await refreshLessonProgress(profile, row.id);
+                if (active) {
+                  setEnrollment(reconciled);
+                  setCompleted(reconciled.completed);
+                }
+              } catch {
+                // The stored progress is sufficient to display the lesson; reconcile when online again.
+              }
+            }
           }
         }
       } catch (loadError) {
@@ -79,7 +96,7 @@ export default function LessonDetailScreen() {
   }, [id, profile]));
 
   async function toggleContentDone(contentId: string) {
-    if (!profile || !lesson || !enrollment) return;
+    if (!profile || !lesson || !enrollment || savingContentId) return;
     setSavingContentId(contentId);
     setError(null);
     try {
@@ -88,6 +105,39 @@ export default function LessonDetailScreen() {
       setCompleted(nextEnrollment.completed);
     } catch (progressError) {
       setError(errorMessage(progressError));
+    } finally {
+      setSavingContentId(null);
+    }
+  }
+
+  async function submitAnswer(questionId: string, selectedIndex: number) {
+    if (!profile || !lesson || !enrollment || savingContentId) return;
+    setSavingContentId(questionId); setError(null);
+    try {
+      const next = await submitLessonAnswer(profile, lesson.id, questionId, selectedIndex, lesson.quizRevision ?? 0);
+      setEnrollment(next); setCompleted(next.completed);
+    } catch (e) {
+      setError(errorMessage(e));
+      // Refresh stale questions without submitting an answer against unseen options.
+      try {
+        const row = await getLesson(lesson.id);
+        if (row) {
+          const next = await refreshLessonProgress(profile, row.id);
+          setLesson(row); setEnrollment(next); setCompleted(next.completed);
+        }
+      } catch { /* Keep the original error and allow retry after connectivity returns. */ }
+    }
+    finally { setSavingContentId(null); }
+  }
+
+  async function retryQuiz() {
+    if (!profile || !lesson || !enrollment || savingContentId) return;
+    setSavingContentId('quiz-retry'); setError(null);
+    try {
+      const next = await retryLessonQuiz(profile, lesson.id);
+      setEnrollment(next); setCompleted(next.completed);
+    } catch (retryError) {
+      setError(errorMessage(retryError));
     } finally {
       setSavingContentId(null);
     }
@@ -139,12 +189,14 @@ export default function LessonDetailScreen() {
                 item={item}
                 index={index}
                 done={!!enrollment?.completedContentIds.includes(item.id)}
-                saving={savingContentId === item.id}
+                saving={savingContentId !== null}
                 onToggleDone={
                   enrollment ? () => void toggleContentDone(item.id) : undefined
                 }
               />
             ))}
+
+            {enrollment ? <KnowledgeCheck key={`${lesson.id}-${lesson.quizRevision ?? 0}`} lesson={lesson} enrollment={enrollment} onSubmit={submitAnswer} onRetry={retryQuiz} busy={savingContentId !== null} /> : null}
 
             {enrollment ? (
               completed ? (

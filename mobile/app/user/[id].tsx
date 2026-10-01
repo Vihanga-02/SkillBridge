@@ -341,9 +341,14 @@ export default function UserProfileScreen() {
                   const isOwnLesson = me?.uid === lesson.teacherId;
                   const isEnrolled = enrolledIds.has(lesson.id);
                   const enrollment = enrollmentByLesson.get(lesson.id);
-                  const canEnroll = !!me && viewerCanLearn && !isEnrolled && !lesson.deleting;
-                  const actionLabel = enrollment?.completed
-                    ? 'Review Lesson'
+                  const canEnroll =
+                    !!me && viewerCanLearn && !isOwnLesson && !isEnrolled && !lesson.deleting;
+                  const reviewSubmitted =
+                    enrollment?.completed === true && enrollment.reviewedByLearner === true;
+                  const actionLabel = reviewSubmitted
+                    ? 'Review submitted'
+                    : enrollment?.completed
+                      ? 'Review Lesson'
                     : isEnrolled
                       ? 'Continue Learning'
                       : 'Enroll';
@@ -389,16 +394,29 @@ export default function UserProfileScreen() {
                               style={styles.lessonAction}
                             />
                           ) : null}
-                          {!isOwnLesson || viewerCanLearn ? (
+                          {!isOwnLesson ? (
                             <Button
                               label={actionLabel}
-                              icon={isEnrolled ? 'play-outline' : 'add-outline'}
+                              icon={
+                                reviewSubmitted
+                                  ? 'checkmark-circle-outline'
+                                  : enrollment?.completed
+                                    ? 'star-outline'
+                                    : isEnrolled
+                                      ? 'play-outline'
+                                      : 'add-outline'
+                              }
                               variant={canEnroll ? 'primary' : 'secondary'}
-                              disabled={!canEnroll && !isEnrolled}
+                              disabled={reviewSubmitted || (!canEnroll && !isEnrolled)}
                               loading={enrollingId === lesson.id}
                               onPress={() => {
                                 if (isEnrolled) {
-                                  router.push({ pathname: '/lesson/[id]', params: { id: lesson.id } });
+                                  router.push({
+                                    pathname: enrollment?.completed
+                                      ? '/review/lesson/[id]'
+                                      : '/lesson/[id]',
+                                    params: { id: lesson.id },
+                                  });
                                 } else if (canEnroll) {
                                   void enroll(lesson);
                                 }

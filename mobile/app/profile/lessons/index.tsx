@@ -225,6 +225,9 @@ export default function MyLessonsScreen() {
                     {enrollments.map((enrollment) => {
                       const lesson = enrolledLessonById.get(enrollment.lessonId);
                       const contentCount = lesson?.contents.length ?? enrollment.contentCount;
+                      const reviewSubmitted =
+                        enrollment.completed && enrollment.reviewedByLearner;
+
                       return (
                         <Card key={enrollment.id}>
                           <View style={styles.cardBody}>
@@ -240,10 +243,30 @@ export default function MyLessonsScreen() {
                               completed={enrollment.completed}
                             />
                             <Button
-                              label={enrollment.completed ? 'Review Lesson' : 'Continue Learning'}
-                              icon="play-outline"
+                              label={
+                                reviewSubmitted
+                                  ? 'Open Lesson'
+                                  : enrollment.completed
+                                    ? 'Review Lesson'
+                                    : 'Continue Learning'
+                              }
+                              icon={
+                                reviewSubmitted
+                                  ? 'eye-outline'
+                                  : enrollment.completed
+                                    ? 'star-outline'
+                                    : 'play-outline'
+                              }
+                              variant={enrollment.completed ? 'secondary' : 'primary'}
                               onPress={() =>
-                                router.push({ pathname: '/lesson/[id]', params: { id: enrollment.lessonId } })
+                                router.push({
+                                  // A submitted review must never trap the learner outside
+                                  // their completed lesson. They can still reopen its content.
+                                  pathname: reviewSubmitted || !enrollment.completed
+                                    ? '/lesson/[id]'
+                                    : '/review/lesson/[id]',
+                                  params: { id: enrollment.lessonId },
+                                })
                               }
                             />
                           </View>

@@ -19,10 +19,30 @@ import {
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 
-import { PAGE_SIZE, TEXT_LIMITS } from '@/constants/config';
+import { FILE_LIMITS, PAGE_SIZE, TEXT_LIMITS } from '@/constants/config';
 import { skillByTag } from '@/constants/skills';
 import { db } from '@/firebase/config';
-import type { Comment, Post, PostType, SkillTag, User } from '@/types';
+import {
+  communityImagePath,
+  validateCommunityImageUpload,
+  type CommunityImageUpload,
+} from '@/services/communityMedia';
+import {
+  communityStatsRef,
+  contributionCreatedFields,
+  contributionRemovedFields,
+  type ContributionKind,
+} from '@/services/leaderboardService';
+import type {
+  Comment,
+  CommentReaction,
+  CommentReactions,
+  Post,
+  PostType,
+  SkillTag,
+  User,
+} from '@/types';
+import { deleteFile, uploadFile } from '@/utils/storage';
 
 const postsCol = collection(db, 'posts');
 const POST_TYPES: PostType[] = ['achievement', 'tip', 'question'];
@@ -34,6 +54,7 @@ export type CreatePostInput = {
   type: PostType;
   text: string;
   skillTag?: SkillTag | null;
+  image?: CommunityImageUpload | null;
 };
 
 export type ListPostsOptions = {
@@ -59,13 +80,48 @@ export type CommentPage = {
   cursor: CommentCursor;
 };
 
-const COMMENT_DELETE_BATCH_SIZE = 450;
+/** Quick reactions supported on both comments and their direct replies. */
+export const COMMENT_REACTIONS = [
+  { value: 'like', label: 'Like', emoji: '👍' },
+  { value: 'love', label: 'Love', emoji: '❤️' },
+  { value: 'celebrate', label: 'Celebrate', emoji: '🎉' },
+] as const satisfies readonly { value: CommentReaction; label: string; emoji: string }[];
+
+// Each page also writes one leaderboard decrement per distinct author, so a
+// page of 200 deletes stays under Firestore's 500-operation batch limit.
+const COMMENT_DELETE_BATCH_SIZE = 200;
 
 const toPost = (snapshot: QueryDocumentSnapshot<DocumentData>): Post =>
   ({ ...snapshot.data(), id: snapshot.id }) as Post;
 
-const toComment = (snapshot: QueryDocumentSnapshot<DocumentData>): Comment =>
-  ({ ...snapshot.data(), id: snapshot.id }) as Comment;
+function emptyCommentReactions(): CommentReactions {
+  return { like: [], love: [], celebrate: [] };
+}
+
+function normalizeCommentReactions(value: unknown): CommentReactions {
+  const raw = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+  const normalized = emptyCommentReactions();
+
+  for (const reaction of COMMENT_REACTIONS) {
+    const userIds = raw[reaction.value];
+    normalized[reaction.value] = Array.isArray(userIds)
+      ? [...new Set(userIds.filter((id): id is string => typeof id === 'string' && !!id))]
+      : [];
+  }
+
+  return normalized;
+}
+
+const toComment = (snapshot: QueryDocumentSnapshot<DocumentData>): Comment => {
+  const data = snapshot.data();
+  return {
+    ...data,
+    id: snapshot.id,
+    parentCommentId: typeof data.parentCommentId === 'string' ? data.parentCommentId : null,
+    replyCount: Number.isSafeInteger(data.replyCount) && data.replyCount > 0 ? data.replyCount : 0,
+    reactions: normalizeCommentReactions(data.reactions),
+  } as Comment;
+};
 
 function timestampMillis(value: Post['createdAt']): number {
   return value?.toMillis?.() ?? 0;
@@ -89,28 +145,43 @@ function validatePostInput(input: CreatePostInput): { text: string; skillTag?: S
   return { text, ...(input.skillTag ? { skillTag: input.skillTag } : {}) };
 }
 
-/** Creates a text-only community post. Image uploads remain a later enhancement. */
+/** Creates a post with optional image media and removes a failed upload if Firestore rejects the post. */
 export async function createPost(author: PostAuthor, input: CreatePostInput): Promise<string> {
   const { text, skillTag } = validatePostInput(input);
   const postRef = doc(postsCol);
+  const image = input.image ? validateCommunityImageUpload(input.image) : null;
+  let upload: { url: string; path: string } | null = null;
 
-  await runTransaction(db, async (transaction) => {
-    transaction.set(postRef, {
-      id: postRef.id,
-      authorId: author.uid,
-      authorName: author.name,
-      authorAvatarUrl: author.avatarUrl ?? '',
-      type: input.type,
-      text,
-      ...(skillTag ? { skillTag } : {}),
-      likedBy: [],
-      likeCount: 0,
-      commentCount: 0,
-      // Gemini moderation is deliberately not part of this text-only core flow.
-      moderation: 'skipped',
-      createdAt: serverTimestamp(),
+  if (image) {
+    const path = communityImagePath('posts', postRef.id, postRef.id, image.contentType);
+    upload = await uploadFile(path, image.uri, FILE_LIMITS.postImage, image.contentType);
+  }
+
+  try {
+    await runTransaction(db, async (transaction) => {
+      transaction.set(postRef, {
+        id: postRef.id,
+        authorId: author.uid,
+        authorName: author.name,
+        authorAvatarUrl: author.avatarUrl ?? '',
+        type: input.type,
+        text,
+        ...(skillTag ? { skillTag } : {}),
+        ...(upload ? { imageUrl: upload.url, imagePath: upload.path } : {}),
+        likedBy: [],
+        likeCount: 0,
+        commentCount: 0,
+        // Gemini moderation is deliberately not part of this core flow.
+        moderation: 'skipped',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      transaction.set(communityStatsRef(author.uid), contributionCreatedFields('post', author), { merge: true });
     });
-  });
+  } catch (error) {
+    if (upload) await deleteFile(upload.path).catch(() => undefined);
+    throw error;
+  }
 
   return postRef.id;
 }
@@ -157,6 +228,34 @@ export async function getPost(postId: string): Promise<Post | null> {
   return snapshot.exists() ? ({ ...snapshot.data(), id: snapshot.id } as Post) : null;
 }
 
+/** Lets only the post author update the text caption while retaining its media and metadata. */
+export async function editPostCaption(
+  postId: string,
+  authorId: string,
+  rawText: string
+): Promise<string> {
+  const text = rawText.trim();
+  if (!text) throw new Error('Write a caption before saving.');
+  if (text.length > TEXT_LIMITS.post) {
+    throw new Error(`Posts must be ${TEXT_LIMITS.post} characters or fewer.`);
+  }
+
+  const postRef = doc(postsCol, postId);
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(postRef);
+    if (!snapshot.exists() || snapshot.data().deleting === true) {
+      throw new Error('This post is no longer available.');
+    }
+    if (snapshot.data().authorId !== authorId) {
+      throw new Error('Only the author can edit this caption.');
+    }
+
+    transaction.update(postRef, { text, updatedAt: serverTimestamp() });
+  });
+
+  return text;
+}
+
 /** Returns whether the post is liked after the operation finishes. */
 export async function toggleLike(postId: string, uid: string): Promise<boolean> {
   const postRef = doc(postsCol, postId);
@@ -201,12 +300,66 @@ export async function addComment(postId: string, author: PostAuthor, rawText: st
       authorName: author.name,
       authorAvatarUrl: author.avatarUrl ?? '',
       text,
+      parentCommentId: null,
+      replyCount: 0,
+      reactions: emptyCommentReactions(),
       createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     });
     transaction.update(postRef, { commentCount: increment(1) });
+    transaction.set(communityStatsRef(author.uid), contributionCreatedFields('comment', author), { merge: true });
   });
 
   return commentRef.id;
+}
+
+/** Adds one direct reply to an existing top-level comment. */
+export async function addCommentReply(
+  postId: string,
+  parentCommentId: string,
+  author: PostAuthor,
+  rawText: string
+): Promise<string> {
+  const text = rawText.trim();
+  if (!text) throw new Error('Write a reply before posting it.');
+  if (text.length > TEXT_LIMITS.comment) {
+    throw new Error(`Replies must be ${TEXT_LIMITS.comment} characters or fewer.`);
+  }
+
+  const postRef = doc(postsCol, postId);
+  const parentRef = doc(postRef, 'comments', parentCommentId);
+  const replyRef = doc(collection(parentRef, 'replies'));
+
+  await runTransaction(db, async (transaction) => {
+    const [postSnapshot, parentSnapshot] = await Promise.all([
+      transaction.get(postRef),
+      transaction.get(parentRef),
+    ]);
+    if (!postSnapshot.exists() || postSnapshot.data().deleting === true || !parentSnapshot.exists()) {
+      throw new Error('This comment is no longer available for replies.');
+    }
+
+    transaction.set(replyRef, {
+      id: replyRef.id,
+      authorId: author.uid,
+      authorName: author.name,
+      authorAvatarUrl: author.avatarUrl ?? '',
+      text,
+      parentCommentId,
+      replyCount: 0,
+      reactions: emptyCommentReactions(),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    transaction.update(parentRef, {
+      replyCount: increment(1),
+      updatedAt: serverTimestamp(),
+    });
+    transaction.update(postRef, { commentCount: increment(1) });
+    transaction.set(communityStatsRef(author.uid), contributionCreatedFields('reply', author), { merge: true });
+  });
+
+  return replyRef.id;
 }
 
 /**
@@ -232,6 +385,108 @@ export async function listComments(
 }
 
 /**
+ * Returns direct replies newest-first. This keeps a just-submitted reply in the
+ * first page instead of hiding it behind the first 30 older replies.
+ */
+export async function listCommentReplies(
+  postId: string,
+  parentCommentId: string,
+  { pageSize = PAGE_SIZE.comments, cursor = null }: ListCommentsOptions = {}
+): Promise<CommentPage> {
+  const safePageSize = Math.max(1, Math.min(pageSize, PAGE_SIZE.comments));
+  const constraints: QueryConstraint[] = [orderBy('createdAt', 'desc')];
+  if (cursor) constraints.push(startAfter(cursor));
+  constraints.push(limit(safePageSize + 1));
+
+  const snapshot = await getDocs(
+    query(collection(db, 'posts', postId, 'comments', parentCommentId, 'replies'), ...constraints)
+  );
+  const visible = snapshot.docs.slice(0, safePageSize);
+
+  return {
+    comments: visible.map(toComment),
+    cursor: snapshot.docs.length > safePageSize ? visible[visible.length - 1] ?? null : null,
+  };
+}
+
+/**
+ * Selects one reaction per user. Selecting the same reaction again removes it;
+ * choosing another switches the existing reaction atomically.
+ */
+export async function toggleCommentReaction(
+  postId: string,
+  commentId: string,
+  uid: string,
+  reaction: CommentReaction,
+  parentCommentId?: string
+): Promise<CommentReaction | null> {
+  if (!uid) throw new Error('Sign in to react to a comment.');
+
+  const commentRef = parentCommentId
+    ? doc(db, 'posts', postId, 'comments', parentCommentId, 'replies', commentId)
+    : doc(db, 'posts', postId, 'comments', commentId);
+  const postRef = doc(postsCol, postId);
+
+  return runTransaction(db, async (transaction) => {
+    const [postSnapshot, snapshot] = await Promise.all([
+      transaction.get(postRef),
+      transaction.get(commentRef),
+    ]);
+    if (!postSnapshot.exists() || postSnapshot.data().deleting === true || !snapshot.exists()) {
+      throw new Error('This comment is no longer available.');
+    }
+
+    const reactions = normalizeCommentReactions(snapshot.data().reactions);
+    const selected =
+      COMMENT_REACTIONS.find((item) => reactions[item.value].includes(uid))?.value ?? null;
+
+    for (const item of COMMENT_REACTIONS) {
+      reactions[item.value] = reactions[item.value].filter((reactorId) => reactorId !== uid);
+    }
+    if (selected !== reaction) reactions[reaction] = [...reactions[reaction], uid];
+
+    transaction.update(commentRef, { reactions, updatedAt: serverTimestamp() });
+    return selected === reaction ? null : reaction;
+  });
+}
+
+/**
+ * Takes the deleted items' points back from their authors in the same batch
+ * as the deletes, so a retried post deletion never subtracts twice.
+ */
+function removeContributionsInBatch(
+  batch: ReturnType<typeof writeBatch>,
+  docs: QueryDocumentSnapshot<DocumentData>[],
+  kind: ContributionKind
+): void {
+  const countsByAuthor = new Map<string, number>();
+  for (const item of docs) {
+    const authorId = item.data().authorId;
+    if (typeof authorId === 'string' && authorId) {
+      countsByAuthor.set(authorId, (countsByAuthor.get(authorId) ?? 0) + 1);
+    }
+  }
+
+  countsByAuthor.forEach((count, authorId) => {
+    batch.set(communityStatsRef(authorId), contributionRemovedFields(authorId, kind, count), { merge: true });
+  });
+}
+
+async function deleteCommentReplies(postRef: ReturnType<typeof doc>, commentId: string): Promise<void> {
+  const repliesCol = collection(postRef, 'comments', commentId, 'replies');
+
+  while (true) {
+    const snapshot = await getDocs(query(repliesCol, limit(COMMENT_DELETE_BATCH_SIZE)));
+    if (snapshot.empty) return;
+
+    const batch = writeBatch(db);
+    snapshot.docs.forEach((reply) => batch.delete(reply.ref));
+    removeContributionsInBatch(batch, snapshot.docs, 'reply');
+    await batch.commit();
+  }
+}
+
+/**
  * Removes the post and every nested comment. Firestore does not cascade a
  * document delete into subcollections, so the post is first marked as deleting
  * to reject new comments while batched cleanup runs. The final security rules
@@ -241,6 +496,7 @@ export async function deletePost(postId: string, authorId: string): Promise<void
   const postRef = doc(postsCol, postId);
   const commentsCol = collection(postRef, 'comments');
   let deletionStarted = false;
+  let imagePath = '';
 
   try {
     await runTransaction(db, async (transaction) => {
@@ -253,6 +509,7 @@ export async function deletePost(postId: string, authorId: string): Promise<void
         throw new Error('This post is already being deleted.');
       }
 
+      imagePath = typeof snapshot.data().imagePath === 'string' ? snapshot.data().imagePath : '';
       transaction.update(postRef, { deleting: true });
     });
     deletionStarted = true;
@@ -263,8 +520,15 @@ export async function deletePost(postId: string, authorId: string): Promise<void
       const snapshot = await getDocs(query(commentsCol, limit(COMMENT_DELETE_BATCH_SIZE)));
       if (snapshot.empty) break;
 
+      // Firestore does not cascade a parent document deletion into replies.
+      // Remove every reply page before the parent comment is batched away.
+      for (const comment of snapshot.docs) {
+        await deleteCommentReplies(postRef, comment.id);
+      }
+
       const batch = writeBatch(db);
       snapshot.docs.forEach((comment) => batch.delete(comment.ref));
+      removeContributionsInBatch(batch, snapshot.docs, 'comment');
       await batch.commit();
     }
 
@@ -276,7 +540,12 @@ export async function deletePost(postId: string, authorId: string): Promise<void
       }
 
       transaction.delete(postRef);
+      transaction.set(communityStatsRef(authorId), contributionRemovedFields(authorId, 'post'), { merge: true });
     });
+
+    // Storage has no cross-service transaction with Firestore. The document is
+    // already gone, so a failed cleanup must not make the UI claim deletion failed.
+    if (imagePath) await deleteFile(imagePath).catch(() => undefined);
   } catch (error) {
     // A failed cleanup must not leave a normal post permanently unavailable.
     if (deletionStarted) {

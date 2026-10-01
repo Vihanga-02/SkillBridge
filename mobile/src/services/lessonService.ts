@@ -164,6 +164,16 @@ function normalizeLesson(data: Record<string, unknown>): Lesson {
   } as Lesson;
 }
 
+function quizzesEqual(left: QuizQuestion[], right: QuizQuestion[]): boolean {
+  return left.length === right.length && left.every((question, index) => {
+    const other = right[index];
+    return question.id === other.id && question.q === other.q &&
+      question.answerIndex === other.answerIndex &&
+      question.options.length === other.options.length &&
+      question.options.every((option, optionIndex) => option === other.options[optionIndex]);
+  });
+}
+
 export function extractYouTubeVideoId(value: string): string | null {
   const url = value.trim();
   if (!url) return null;
@@ -480,11 +490,15 @@ export async function updateLesson(teacher: User, lessonId: string, input: Lesso
       if (currentSnapshot.data().deleting === true) {
         throw new Error('This lesson is being deleted and can no longer be edited.');
       }
-      if (input.quiz && (currentSnapshot.data().quizRevision ?? 0) !== (input.quizRevision ?? 0)) {
+      const currentLesson = normalizeLesson({ ...currentSnapshot.data(), id: currentSnapshot.id });
+      const currentQuizRevision = currentLesson.quizRevision ?? 0;
+      const nextQuiz = input.quiz ? validateQuiz(input.quiz) : undefined;
+      const quizChanged = nextQuiz !== undefined && !quizzesEqual(nextQuiz, currentLesson.quiz);
+      if (quizChanged && currentQuizRevision !== (input.quizRevision ?? 0)) {
         throw new Error('Questions changed in another session. Reopen this lesson before saving.');
       }
       transaction.update(lessonRef, {
-        ...(input.quiz ? { quiz: validateQuiz(input.quiz), quizRevision: (currentSnapshot.data().quizRevision ?? 0) + 1 } : {}),
+        ...(quizChanged ? { quiz: nextQuiz, quizRevision: currentQuizRevision + 1 } : {}),
         ...basePayload(teacher, input),
         contents: nextContents,
         updatedAt: serverTimestamp(),
@@ -700,7 +714,8 @@ export async function enrollInLesson(user: User, lesson: Lesson): Promise<void> 
 }
 
 type ProgressAction = { type: 'toggle'; contentId: string } |
-  { type: 'answer'; questionId: string; selectedIndex: number; quizRevision?: number } | { type: 'refresh' } | { type: 'complete' };
+  { type: 'answer'; questionId: string; selectedIndex: number; quizRevision?: number } |
+  { type: 'retryQuiz' } | { type: 'refresh' } | { type: 'complete' };
 
 async function updateLearningProgress(user: User, lessonId: string, action: ProgressAction): Promise<LessonEnrollment> {
   if (auth.currentUser?.uid !== user.uid || !['learner', 'both'].includes(user.role)) {
@@ -743,10 +758,17 @@ async function updateLearningProgress(user: User, lessonId: string, action: Prog
         question: question.q, options: [...question.options], answerIndex: question.answerIndex,
       };
     }
+    if (action.type === 'retryQuiz') {
+      for (const [index, question] of lesson.quiz.entries()) {
+        delete quizAnswers[questionId(question, index)];
+      }
+    }
     const completedContentIds = [...completedIds];
     const result = lessonCompletion(lesson, { completedContentIds, quizAnswers });
     const requirementsKey = JSON.stringify([lesson.contents.map(item => item.id), lesson.quiz.map(q => q.id)]);
-    if (action.type === 'complete' && !result.completed) throw new Error('Complete all materials and submit all questions first.');
+    if (action.type === 'complete' && !result.completed) {
+      throw new Error('Complete all materials and pass the knowledge check first.');
+    }
     const delta = Number(result.completed) - Number(enrollment.completed);
     if (action.type === 'refresh' && enrollment.progress === result.progress && enrollment.completed === result.completed &&
         enrollmentSnapshot.data().requirementsKey === requirementsKey) return enrollment;
@@ -778,6 +800,8 @@ export const toggleLessonContentDone = (user: User, lesson: Lesson, contentId: s
   updateLearningProgress(user, lesson.id, { type: 'toggle', contentId });
 export const submitLessonAnswer = (user: User, lessonId: string, questionId: string, selectedIndex: number, quizRevision?: number) =>
   updateLearningProgress(user, lessonId, { type: 'answer', questionId, selectedIndex, quizRevision });
+export const retryLessonQuiz = (user: User, lessonId: string) =>
+  updateLearningProgress(user, lessonId, { type: 'retryQuiz' });
 export const refreshLessonProgress = (user: User, lessonId: string) =>
   updateLearningProgress(user, lessonId, { type: 'refresh' });
 export async function markLessonCompleted(user: User, lesson: Lesson): Promise<void> {

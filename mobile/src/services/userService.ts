@@ -35,6 +35,7 @@ import { careerGoalByTag, skillsInGoal, type CareerGoalTag } from '@/constants/c
 import { FILE_LIMITS, PAGE_SIZE } from '@/constants/config';
 import { skillLabel, skillsInCategory, type Category } from '@/constants/skills';
 import { auth, db } from '@/firebase/config';
+import { syncLeaderboardIdentity } from '@/services/leaderboardService';
 import { nextCursor, type PageCursor } from '@/services/pagination';
 import type {
   CareerGoal,
@@ -268,6 +269,12 @@ export async function updateProfile(uid: string, patch: ProfilePatch): Promise<v
   // device shows the right name before the profile document has loaded.
   if (patch.name !== undefined && auth.currentUser?.uid === uid) {
     await updateAuthProfile(auth.currentUser, { displayName: patch.name.trim() });
+  }
+
+  // The leaderboard keeps its own copy of name/avatar. A failed copy must not
+  // fail the profile save; the next post or comment refreshes it anyway.
+  if (patch.name !== undefined || patch.avatarUrl !== undefined) {
+    await syncLeaderboardIdentity(uid, { name: patch.name, avatarUrl: patch.avatarUrl }).catch(() => undefined);
   }
 }
 

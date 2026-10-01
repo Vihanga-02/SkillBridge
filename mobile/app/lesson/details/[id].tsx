@@ -183,9 +183,31 @@ export default function LessonDetailsScreen() {
                   message={lessonCompletion(lesson, enrollment).completed ? '✓ Completed' : '✓ Enrolled'}
                 />
                 <Button
-                  label={enrollment.completed ? 'Review Lesson' : 'Continue Learning'}
-                  icon="play-outline"
-                  onPress={() => router.push({ pathname: '/lesson/[id]', params: { id: lesson.id } })}
+                  label={
+                    enrollment.completed
+                      ? enrollment.reviewedByLearner
+                        ? 'Open Lesson'
+                        : 'Review Lesson'
+                      : 'Continue Learning'
+                  }
+                  icon={
+                    enrollment.completed
+                      ? enrollment.reviewedByLearner
+                        ? 'eye-outline'
+                        : 'star-outline'
+                      : 'play-outline'
+                  }
+                  variant={enrollment.completed ? 'secondary' : 'primary'}
+                  onPress={() =>
+                    router.push({
+                      // Keep the lesson accessible after the one-time review is submitted.
+                      pathname:
+                        enrollment.completed && !enrollment.reviewedByLearner
+                          ? '/review/lesson/[id]'
+                          : '/lesson/[id]',
+                      params: { id: lesson.id },
+                    })
+                  }
                 />
               </View>
             ) : canLearn ? (

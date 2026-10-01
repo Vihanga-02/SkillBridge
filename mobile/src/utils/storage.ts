@@ -59,7 +59,15 @@ export async function uploadFile(
     ...(customMetadata ? { customMetadata } : {}),
   });
 
-  return { url: await getDownloadURL(storageRef), path, sizeBytes: blob.size };
+  try {
+    return { url: await getDownloadURL(storageRef), path, sizeBytes: blob.size };
+  } catch (error) {
+    // The bytes already reached Storage, but without a download URL no
+    // Firestore document can reference them. Remove the orphan and preserve the
+    // URL failure as the error the caller sees.
+    await deleteObject(storageRef).catch(() => undefined);
+    throw error;
+  }
 }
 
 /** Missing files are not an error — a repeated delete should still succeed. */

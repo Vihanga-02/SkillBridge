@@ -16,4 +16,3 @@ export const SKILL_QUIZ_CONCEPTS = {
   ...BUSINESS_QUIZ_CONCEPTS,
   ...ACADEMIC_QUIZ_CONCEPTS,
 } satisfies Record<SkillTag, readonly QuizConcept[]>;
-

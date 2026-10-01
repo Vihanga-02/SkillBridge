@@ -43,6 +43,8 @@ export function ReviewCard({ review }: Props) {
 
       <SkillChip label={skillLabel(review.skillTag)} />
 
+      <Text style={styles.source}>{review.source === 'lesson' ? 'Lesson review' : 'Session review'}</Text>
+
       {review.comment ? <Text style={styles.comment}>{review.comment}</Text> : null}
 
       {review.tags?.length ? (
@@ -77,6 +79,10 @@ const styles = StyleSheet.create({
   comment: {
     ...type.body,
     color: colors.ink,
+  },
+  source: {
+    ...type.caption,
+    color: colors.inkMuted,
   },
   tags: {
     flexDirection: 'row',

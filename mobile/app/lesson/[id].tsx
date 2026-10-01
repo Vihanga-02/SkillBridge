@@ -200,7 +200,21 @@ export default function LessonDetailScreen() {
 
             {enrollment ? (
               completed ? (
-                <Notice tone="success" message="✓ Lesson Completed" />
+                <View style={styles.completionActions}>
+                  <Notice tone="success" message="✓ Lesson Completed" />
+                  {enrollment.reviewedByLearner ? (
+                    <Notice tone="success" message="You have already reviewed this lesson." />
+                  ) : (
+                    <Button
+                      label="Leave a review"
+                      variant="secondary"
+                      icon="star-outline"
+                      onPress={() =>
+                        router.push({ pathname: '/review/lesson/[id]', params: { id: lesson.id } })
+                      }
+                    />
+                  )}
+                </View>
               ) : null
             ) : (
               <Notice tone="info" message="This is your lesson. Learner progress is tracked after enrollment." />
@@ -434,6 +448,9 @@ const styles = StyleSheet.create({
   meta: {
     ...type.caption,
     color: colors.inkMuted,
+  },
+  completionActions: {
+    gap: spacing.md,
   },
   block: {
     gap: spacing.md,

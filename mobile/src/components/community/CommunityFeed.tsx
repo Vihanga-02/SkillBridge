@@ -93,11 +93,21 @@ export function CommunityFeed() {
       onEndReachedThreshold={0.4}
       ListHeaderComponent={
         <View style={styles.header}>
-          <Button
-            label="Create post"
-            icon="add-outline"
-            onPress={() => router.push('/post/create')}
-          />
+          <View style={styles.feedActions}>
+            <Button
+              label="Create post"
+              icon="add-outline"
+              onPress={() => router.push('/post/create')}
+              style={styles.feedAction}
+            />
+            <Button
+              label="Leaderboard"
+              icon="trophy-outline"
+              variant="secondary"
+              onPress={() => router.push('/leaderboard')}
+              style={styles.feedAction}
+            />
+          </View>
 
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
             {FILTERS.map((option) => (
@@ -150,6 +160,13 @@ const styles = StyleSheet.create({
   },
   header: {
     gap: spacing.md,
+  },
+  feedActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  feedAction: {
+    flex: 1,
   },
   filters: {
     gap: spacing.sm,

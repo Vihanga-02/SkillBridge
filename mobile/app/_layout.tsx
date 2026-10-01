@@ -107,6 +107,7 @@ function RootNavigator() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="user/[id]" />
         <Stack.Screen name="chat/[id]" />
+        <Stack.Screen name="leaderboard" />
         <Stack.Screen name="post/create" />
         <Stack.Screen name="post/[id]" />
         <Stack.Screen name="credential/[id]" />
@@ -116,6 +117,9 @@ function RootNavigator() {
         <Stack.Screen name="profile/credentials/add" />
         <Stack.Screen name="profile/lessons/index" />
         <Stack.Screen name="profile/lessons/form" />
+        <Stack.Screen name="profile/roadmaps/index" />
+        <Stack.Screen name="profile/roadmaps/form" />
+        <Stack.Screen name="profile/roadmaps/[id]" />
         <Stack.Screen name="profile/skill-test/[skill]" />
         <Stack.Screen name="lesson/[id]" />
         <Stack.Screen name="lesson/details/[id]" />
@@ -125,6 +129,7 @@ function RootNavigator() {
         <Stack.Screen name="booking/[id]" />
         <Stack.Screen name="booking/calendar" />
         <Stack.Screen name="review/[id]" />
+        <Stack.Screen name="review/lesson/[id]" />
       </Stack.Protected>
 
       <Stack.Screen name="+not-found" options={{ headerShown: true, title: 'Not found' }} />

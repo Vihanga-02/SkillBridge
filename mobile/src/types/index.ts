@@ -260,8 +260,26 @@ export type LessonEnrollment = {
   quizAnswers?: Record<string, LessonQuizAnswer>;
   progress: number;
   completed: boolean;
+  /** Set by the review transaction after this learner reviews the completed lesson. */
+  reviewedByLearner: boolean;
   completedAt: Timestamp | null;
   enrolledAt: Timestamp | null;
+  updatedAt: Timestamp | null;
+};
+
+/** Manual teacher-created paths; separate from any personalized/AI roadmap data. */
+export type TeacherRoadmap = {
+  id: string;
+  teacherId: string;
+  teacherName: string;
+  title: string;
+  careerGoalId: CareerGoalTag;
+  skill: string;
+  skillKey: string;
+  description: string;
+  lessonIds: string[];
+  revision: number;
+  createdAt: Timestamp | null;
   updatedAt: Timestamp | null;
 };
 
@@ -333,8 +351,13 @@ export type Booking = {
 /** `reviews/{reviewId}` — owner: Member 4. */
 export type Review = {
   id: string;
-  bookingId: string;
-  sessionId: string;
+  /** Whether this feedback follows a completed session or a completed lesson. */
+  source: 'session' | 'lesson';
+  /** Present for reviews created from a session booking. */
+  bookingId?: string;
+  sessionId?: string;
+  /** Present for reviews created from a lesson enrollment. */
+  lessonId?: string;
   skillTag: SkillTag;
   fromUserId: string;
   fromUserName: string;
@@ -394,16 +417,44 @@ export type Post = {
   commentCount: number;
   moderation: ModerationState;
   createdAt: Timestamp | null;
+  updatedAt?: Timestamp | null;
 };
 
 /** `posts/{postId}/comments/{commentId}` — owner: Member 4. */
+export type CommentReaction = 'like' | 'love' | 'celebrate';
+export type CommentReactions = Record<CommentReaction, string[]>;
+
 export type Comment = {
   id: string;
   authorId: string;
   authorName: string;
   authorAvatarUrl: string;
   text: string;
+  parentCommentId: string | null;
+  replyCount: number;
+  reactions: CommentReactions;
   createdAt: Timestamp | null;
+  updatedAt?: Timestamp | null;
+};
+
+/**
+ * `communityStats/{uid}` — denormalized ranking read model.
+ *
+ * `postService` updates it in the same transaction/batch that creates or
+ * deletes the post, comment or reply, so the score can never drift from the
+ * content. Keeping the counters outside `users/{uid}` avoids loading every
+ * profile just to render the top contributors.
+ */
+export type CommunityStats = {
+  userId: string;
+  name: string;
+  avatarUrl: string;
+  communityScore: number;
+  postCount: number;
+  commentCount: number;
+  replyCount: number;
+  lastContributionAt: Timestamp | null;
+  updatedAt: Timestamp | null;
 };
 
 /** `aiUsage/{uid}` — the daily Gemini cap (§11.4). */

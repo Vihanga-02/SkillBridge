@@ -2,7 +2,7 @@ import { lessonCompletion } from '@/utils/lessonProgress';
 import { DeleteLessonButton } from '@/components/lesson/DeleteLessonButton';
 import { EnrollmentCount } from '@/components/lesson/EnrollmentCount';
 import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, type Href } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -126,6 +126,16 @@ export default function MyLessonsScreen() {
           }
         />
 
+        <View style={styles.padded}>
+          <View style={styles.list}>
+            <Text style={styles.sectionTitle}>Learning Roadmaps</Text>
+            {canTeach ? <Button label="Manage Learning Roadmaps" variant="secondary" icon="map-outline"
+              onPress={() => router.push({ pathname: '/profile/roadmaps', params: { mode: 'teach' } } as Href)} /> : null}
+            {canLearn ? <Button label="My Learning Roadmaps" variant="secondary" icon="map-outline"
+              onPress={() => router.push({ pathname: '/profile/roadmaps', params: { mode: 'learn' } } as Href)} /> : null}
+          </View>
+        </View>
+
         {dualRole ? (
           <View style={styles.padded}>
             <View style={styles.tabs}>
@@ -236,6 +246,9 @@ export default function MyLessonsScreen() {
                       const lesson = enrolledLessonById.get(enrollment.lessonId);
                       const status = lesson ? lessonCompletion(lesson, enrollment) : enrollment;
                       const contentCount = lesson?.contents.length ?? enrollment.contentCount;
+                      const reviewSubmitted =
+                        status.completed && enrollment.reviewedByLearner;
+
                       return (
                         <Card key={enrollment.id}>
                           <View style={styles.cardBody}>
@@ -251,10 +264,30 @@ export default function MyLessonsScreen() {
                               completed={status.completed}
                             />
                             <Button
-                              label={status.completed ? 'Review Lesson' : 'Continue Learning'}
-                              icon="play-outline"
+                              label={
+                                reviewSubmitted
+                                  ? 'Open Lesson'
+                                  : status.completed
+                                    ? 'Review Lesson'
+                                    : 'Continue Learning'
+                              }
+                              icon={
+                                reviewSubmitted
+                                  ? 'eye-outline'
+                                  : status.completed
+                                    ? 'star-outline'
+                                    : 'play-outline'
+                              }
+                              variant={status.completed ? 'secondary' : 'primary'}
                               onPress={() =>
-                                router.push({ pathname: '/lesson/[id]', params: { id: enrollment.lessonId } })
+                                router.push({
+                                  // A submitted review must never trap the learner outside
+                                  // their completed lesson. They can still reopen its content.
+                                  pathname: reviewSubmitted || !status.completed
+                                    ? '/lesson/[id]'
+                                    : '/review/lesson/[id]',
+                                  params: { id: enrollment.lessonId },
+                                })
                               }
                             />
                           </View>

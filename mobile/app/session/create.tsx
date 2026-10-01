@@ -1,6 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -21,7 +22,12 @@ import { TimeField } from '@/components/ui/TimeField';
 import { LEVELS, LEVEL_LABELS, skillLabel, type Level, type SkillTag } from '@/constants/skills';
 import { colors, spacing, type } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
-import { createSession, getEditableSession, updateSession } from '@/services/sessionService';
+import {
+  createSession,
+  getEditableSession,
+  SessionScheduleConflictError,
+  updateSession,
+} from '@/services/sessionService';
 import type { SessionMode, SessionType } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
 
@@ -188,7 +194,11 @@ export default function CreateSessionScreen() {
       if (editing && id) await updateSession(profile, id, input);
       router.replace({ pathname: '/session/[id]', params: { id: sessionId } });
     } catch (saveError) {
-      setError(errorMessage(saveError));
+      const message = errorMessage(saveError);
+      setError(message);
+      if (saveError instanceof SessionScheduleConflictError) {
+        Alert.alert('Time slot unavailable', message);
+      }
     } finally {
       setSaving(false);
     }

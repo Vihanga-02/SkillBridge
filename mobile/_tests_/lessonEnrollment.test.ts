@@ -117,6 +117,18 @@ it('creates one enrollment, progress and count together', async () => {
   expect(getDocs).not.toHaveBeenCalled();
   expect(getDocsFromServer).not.toHaveBeenCalled();
 });
+
+it.each([0, -1])('undoing completion cannot decrement legacy counters at %s below zero', async count => {
+  put('users/learner', { stats: { lessonsCompleted: count } });
+  put('lessons/lesson', { ...records.get('lessons/lesson'), completeCount: count,
+    contents: [{ id: 'pdf', type: 'pdf' }] });
+  await enrollInLesson(learner(), lesson);
+  put('enrollments/learner_lesson', { ...records.get('enrollments/learner_lesson'), completed: true,
+    progress: 100, completedContentIds: ['pdf'] });
+  await toggleLessonContentDone(learner(), lesson, 'pdf');
+  expect(records.get('lessons/lesson')?.completeCount).toBe(0);
+  expect(records.get('users/learner')?.['stats.lessonsCompleted']).toBe(0);
+});
 it('rapid duplicate attempts increment once and preserve progress', async () => {
   await Promise.all(Array.from({ length: 5 }, () => enrollInLesson(learner(), lesson)));
   expect(records.get('lessons/lesson')?.enrollmentCount).toBe(1);

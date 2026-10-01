@@ -27,6 +27,13 @@ import type { Booking, BookingStatus, Session, User } from '@/types';
 
 const bookingsCol = collection(db, 'bookings');
 
+export class BookingScheduleConflictError extends Error {
+  constructor(conflictingBooking: Booking) {
+    super(`You already booked "${conflictingBooking.sessionTitle}" during this time.`);
+    this.name = 'BookingScheduleConflictError';
+  }
+}
+
 /** Credits awarded to a teacher for each completed booking. */
 export const SESSION_COMPLETION_CREDITS = 5;
 
@@ -36,6 +43,29 @@ export const bookingIdFor = (sessionId: string, learnerId: string): string =>
 
 const toBooking = (snapshot: QueryDocumentSnapshot<DocumentData>): Booking =>
   ({ ...snapshot.data(), id: snapshot.id }) as Booking;
+
+async function assertLearnerScheduleAvailable(
+  learnerId: string,
+  proposedSession: Session
+): Promise<void> {
+  const snapshot = await getDocs(query(bookingsCol, where('learnerId', '==', learnerId)));
+  const proposedStartMs = proposedSession.startAt?.toMillis?.();
+  if (typeof proposedStartMs !== 'number') return;
+  const proposedEndMs = proposedStartMs + proposedSession.durationMins * 60_000;
+
+  const conflict = snapshot.docs.map(toBooking).find((booking) => {
+    if (!['pending', 'confirmed'].includes(booking.status)) return false;
+    if (booking.sessionId === proposedSession.id) return false;
+
+    const bookedStartMs = booking.startAt?.toMillis?.();
+    if (typeof bookedStartMs !== 'number') return false;
+    const bookedEndMs = bookedStartMs + booking.durationMins * 60_000;
+
+    return proposedStartMs < bookedEndMs && proposedEndMs > bookedStartMs;
+  });
+
+  if (conflict) throw new BookingScheduleConflictError(conflict);
+}
 
 export async function getBooking(bookingId: string): Promise<Booking | null> {
   const snapshot = await getDoc(doc(db, 'bookings', bookingId));
@@ -96,6 +126,8 @@ export async function requestBooking(
   if (learner.role === 'teacher') {
     throw new Error('Switch to Teach & learn before booking a session.');
   }
+
+  await assertLearnerScheduleAvailable(learner.uid, session);
 
   const bookingRef = doc(db, 'bookings', bookingIdFor(session.id, learner.uid));
 

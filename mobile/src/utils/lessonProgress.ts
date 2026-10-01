@@ -1,6 +1,7 @@
 import type { Lesson, LessonEnrollment, QuizQuestion } from '@/types';
 
 export const MAX_LESSON_QUESTIONS = 10;
+export const LESSON_QUIZ_PASS_PERCENT = 60;
 export const questionId = (question: QuizQuestion, index: number) => question.id || `legacy-question-${index}`;
 
 export function validateQuiz(quiz: QuizQuestion[]): QuizQuestion[] {
@@ -32,8 +33,10 @@ export function lessonCompletion(lesson: Pick<Lesson, 'contents' | 'quiz'>,
   const correct = submitted.filter(a => a.correct).length;
   const total = lesson.contents.length + quiz.length;
   const completedItems = materialsDone + submitted.length;
-  const completed = total > 0 && completedItems === total;
-  return { total, completedItems, completed, submitted: submitted.length, correct,
-    quizScore: quiz.length ? Math.round(correct / quiz.length * 100) : 0,
+  const quizScore = quiz.length ? Math.round(correct / quiz.length * 100) : 0;
+  const quizPassed = quiz.length === 0 || quizScore >= LESSON_QUIZ_PASS_PERCENT;
+  const completed = total > 0 && completedItems === total && quizPassed;
+  return { total, completedItems, completed, submitted: submitted.length, correct, quizPassed,
+    quizScore,
     progress: completed ? 100 : total ? Math.min(99, Math.round(completedItems / total * 100)) : 0 };
 }

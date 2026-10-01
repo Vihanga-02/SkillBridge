@@ -5,15 +5,21 @@ import { Card } from '@/components/ui/Card';
 import { Notice } from '@/components/ui/Notice';
 import { colors, spacing, type } from '@/constants/theme';
 import type { Lesson, LessonEnrollment } from '@/types';
-import { lessonCompletion, questionId } from '@/utils/lessonProgress';
+import { LESSON_QUIZ_PASS_PERCENT, lessonCompletion, questionId } from '@/utils/lessonProgress';
 
-export function KnowledgeCheck({ lesson, enrollment, onSubmit, busy }: {
+export function KnowledgeCheck({ lesson, enrollment, onSubmit, onRetry, busy }: {
   lesson: Lesson; enrollment: LessonEnrollment;
-  onSubmit: (id: string, selected: number) => Promise<void>; busy: boolean;
+  onSubmit: (id: string, selected: number) => Promise<void>;
+  onRetry: () => Promise<void>;
+  busy: boolean;
 }) {
   const [selected, setSelected] = useState<Record<string, number>>({});
   const result = lessonCompletion(lesson, enrollment);
   if (!lesson.quiz?.length) return null;
+  async function retry() {
+    await onRetry();
+    setSelected({});
+  }
   return <View style={styles.section}>
     <Text style={styles.heading}>Knowledge Check</Text>
     {lesson.quiz.map((q, index) => {
@@ -35,8 +41,13 @@ export function KnowledgeCheck({ lesson, enrollment, onSubmit, busy }: {
         </>}
       </View></Card>;
     })}
-    {result.submitted === lesson.quiz.length ? <Notice tone="success"
-      message={`Knowledge Check Complete. Score: ${result.correct} / ${lesson.quiz.length} (${result.quizScore}%)`} /> : null}
+    {result.submitted === lesson.quiz.length ? <>
+      <Notice tone={result.quizPassed ? 'success' : 'error'}
+        message={result.quizPassed
+          ? `Knowledge Check Passed. Score: ${result.correct} / ${lesson.quiz.length} (${result.quizScore}%)`
+          : `Score: ${result.correct} / ${lesson.quiz.length} (${result.quizScore}%). You need ${LESSON_QUIZ_PASS_PERCENT}% to pass.`} />
+      {!result.quizPassed ? <Button label="Try Knowledge Check Again" disabled={busy} onPress={() => void retry()} /> : null}
+    </> : null}
   </View>;
 }
 const styles = StyleSheet.create({ section: { gap: spacing.md }, heading: { ...type.bodyStrong, color: colors.ink }, text: { ...type.body, color: colors.inkMuted } });

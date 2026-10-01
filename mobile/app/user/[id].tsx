@@ -25,10 +25,12 @@ import {
   enrollInLesson,
   listEnrollmentsByUser,
   subscribeToLessonsByTeacher,
+  subscribeToEnrollmentsByUser,
 } from '@/services/lessonService';
 import { subscribeToUser } from '@/services/userService';
 import type { Credential, Lesson, LessonEnrollment, User } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
+import { nonNegativeCount } from '@/utils/counts';
 
 export default function UserProfileScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -45,6 +47,7 @@ export default function UserProfileScreen() {
   const [enrollments, setEnrollments] = useState<LessonEnrollment[]>([]);
   const [enrolledIds, setEnrolledIds] = useState<Set<string>>(new Set());
   const [enrollingId, setEnrollingId] = useState<string | null>(null);
+  const [ownEnrolledCount, setOwnEnrolledCount] = useState(0);
 
   const [messageLoading, setMessageLoading] = useState(false);
   const [messageError, setMessageError] = useState<string | null>(null);
@@ -53,6 +56,13 @@ export default function UserProfileScreen() {
 
   const isOwnProfile = !!me && me.uid === id;
   const viewerCanLearn = me?.role === 'learner' || me?.role === 'both';
+  useEffect(() => {
+    setOwnEnrolledCount(0);
+    if (!isOwnProfile || !viewerCanLearn || !id) return;
+    return subscribeToEnrollmentsByUser(id,
+      rows => setOwnEnrolledCount(new Set(rows.map(row => row.lessonId)).size),
+      error => setLessonError(errorMessage(error)));
+  }, [id, isOwnProfile, viewerCanLearn]);
 
   // Live, so a rating written by Member 4's review transaction appears without a
   // manual refresh — this screen only ever reads ratingAvg and ratingCount.
@@ -252,11 +262,15 @@ export default function UserProfileScreen() {
             <View style={styles.statsRow}>
               <Stat label="Taught" value={user.stats?.sessionsTaught ?? 0} />
               <Stat label="Attended" value={user.stats?.sessionsAttended ?? 0} />
-              <Stat
-                label="Lessons"
-                value={canTeach ? teacherLessons.length : (user.stats?.lessonsCompleted ?? 0)}
-              />
+              {!(isOwnProfile && user.role === 'both') ? <Stat
+                label={canTeach ? 'Created Lessons' : isOwnProfile ? 'Enrolled Lessons' : 'Completed Lessons'}
+                value={canTeach ? teacherLessons.length : isOwnProfile ? ownEnrolledCount : (user.stats?.lessonsCompleted ?? 0)}
+              /> : null}
             </View>
+            {isOwnProfile && user.role === 'both' ? <View style={[styles.statsRow, { marginTop: spacing.lg }]}>
+              <Stat label="Created Lessons" value={teacherLessons.length} />
+              <Stat label="Enrolled Lessons" value={ownEnrolledCount} />
+            </View> : null}
           </Card>
         </View>
 
@@ -460,8 +474,8 @@ export default function UserProfileScreen() {
 function Stat({ label, value }: { label: string; value: number }) {
   return (
     <View style={styles.stat}>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
+      <Text style={styles.statValue}>{nonNegativeCount(value)}</Text>
+      <Text style={[styles.statLabel, { textAlign: 'center' }]}>{label}</Text>
     </View>
   );
 }

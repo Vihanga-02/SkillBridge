@@ -1,7 +1,7 @@
 import { DeleteLessonButton } from '@/components/lesson/DeleteLessonButton';
 import { EnrollmentCount } from '@/components/lesson/EnrollmentCount';
 import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, type Href } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -115,6 +115,16 @@ export default function MyLessonsScreen() {
             ) : undefined
           }
         />
+
+        <View style={styles.padded}>
+          <View style={styles.list}>
+            <Text style={styles.sectionTitle}>Learning Roadmaps</Text>
+            {canTeach ? <Button label="Manage Learning Roadmaps" variant="secondary" icon="map-outline"
+              onPress={() => router.push({ pathname: '/profile/roadmaps', params: { mode: 'teach' } } as Href)} /> : null}
+            {canLearn ? <Button label="My Learning Roadmaps" variant="secondary" icon="map-outline"
+              onPress={() => router.push({ pathname: '/profile/roadmaps', params: { mode: 'learn' } } as Href)} /> : null}
+          </View>
+        </View>
 
         {dualRole ? (
           <View style={styles.padded}>

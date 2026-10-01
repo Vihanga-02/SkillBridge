@@ -5,7 +5,6 @@ import {
   getDoc,
   getDocs,
   getDocsFromServer,
-  increment,
   onSnapshot,
   orderBy,
   query,
@@ -23,6 +22,7 @@ import { skillByTag } from '@/constants/skills';
 import { auth, db } from '@/firebase/config';
 import type { Lesson, LessonContent, LessonEnrollment, User } from '@/types';
 import { deleteFile, sanitizeStorageName, uploadFile } from '@/utils/storage';
+import { nonNegativeCount } from '@/utils/counts';
 
 export type LocalPdf = {
   uri: string;
@@ -630,6 +630,17 @@ export async function listEnrollmentIds(userId: string): Promise<Set<string>> {
   return new Set(enrollments.map((enrollment) => enrollment.lessonId));
 }
 
+/** Enrollment documents are the active relationship, including completed lessons. */
+export function subscribeToEnrollmentsByUser(
+  userId: string,
+  onValue: (enrollments: LessonEnrollment[]) => void,
+  onError?: (error: Error) => void
+): () => void {
+  return onSnapshot(query(enrollmentsCol, where('userId', '==', userId)),
+    snapshot => onValue(snapshot.docs.map(toEnrollment)),
+    error => onError?.(error));
+}
+
 export async function enrollInLesson(user: User, lesson: Lesson): Promise<void> {
   if (user.role === 'teacher') throw new Error('Switch to Teach & learn before enrolling in lessons.');
 
@@ -703,9 +714,10 @@ export async function toggleLessonContentDone(
   const lessonRef = doc(db, 'lessons', lesson.id);
   const userRef = doc(db, 'users', user.uid);
   return runTransaction(db, async (transaction) => {
-    const [enrollmentSnapshot, lessonSnapshot] = await Promise.all([
+    const [enrollmentSnapshot, lessonSnapshot, userSnapshot] = await Promise.all([
       transaction.get(enrollmentRef),
       transaction.get(lessonRef),
+      transaction.get(userRef),
     ]);
     if (!enrollmentSnapshot.exists()) {
       throw new Error('Enroll in this lesson before updating progress.');
@@ -757,11 +769,11 @@ export async function toggleLessonContentDone(
 
     if (completionDelta !== 0) {
       transaction.update(lessonRef, {
-        completeCount: increment(completionDelta),
+        completeCount: Math.max(0, nonNegativeCount(lessonSnapshot.data().completeCount) + completionDelta),
         updatedAt: serverTimestamp(),
       });
       transaction.update(userRef, {
-        'stats.lessonsCompleted': increment(completionDelta),
+        'stats.lessonsCompleted': Math.max(0, nonNegativeCount(userSnapshot.data()?.stats?.lessonsCompleted) + completionDelta),
       });
     }
 
@@ -784,9 +796,10 @@ export async function markLessonCompleted(user: User, lesson: Lesson): Promise<v
   const userRef = doc(db, 'users', user.uid);
 
   await runTransaction(db, async (transaction) => {
-    const [enrollmentSnapshot, lessonSnapshot] = await Promise.all([
+    const [enrollmentSnapshot, lessonSnapshot, userSnapshot] = await Promise.all([
       transaction.get(enrollmentRef),
       transaction.get(lessonRef),
+      transaction.get(userRef),
     ]);
     if (!lessonSnapshot.exists() || lessonSnapshot.data().published !== true || lessonSnapshot.data().deleting === true) {
       throw new Error('This lesson is no longer available.');
@@ -823,11 +836,11 @@ export async function markLessonCompleted(user: User, lesson: Lesson): Promise<v
     }
     if (!wasCompleted) {
       transaction.update(lessonRef, {
-        completeCount: increment(1),
+        completeCount: nonNegativeCount(lessonSnapshot.data().completeCount) + 1,
         updatedAt: serverTimestamp(),
       });
       if (enrollmentSnapshot.exists()) {
-        transaction.update(userRef, { 'stats.lessonsCompleted': increment(1) });
+        transaction.update(userRef, { 'stats.lessonsCompleted': nonNegativeCount(userSnapshot.data()?.stats?.lessonsCompleted) + 1 });
       }
     }
   });

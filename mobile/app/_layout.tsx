@@ -117,6 +117,9 @@ function RootNavigator() {
         <Stack.Screen name="profile/credentials/add" />
         <Stack.Screen name="profile/lessons/index" />
         <Stack.Screen name="profile/lessons/form" />
+        <Stack.Screen name="profile/roadmaps/index" />
+        <Stack.Screen name="profile/roadmaps/form" />
+        <Stack.Screen name="profile/roadmaps/[id]" />
         <Stack.Screen name="profile/skill-test/[skill]" />
         <Stack.Screen name="lesson/[id]" />
         <Stack.Screen name="lesson/details/[id]" />

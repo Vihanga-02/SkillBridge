@@ -408,6 +408,25 @@ export type Comment = {
   updatedAt?: Timestamp | null;
 };
 
+/**
+ * `communityStats/{uid}` — server-owned, denormalized ranking read model.
+ *
+ * Only the Cloud Functions leaderboard workers write this document. Keeping the
+ * counters outside `users/{uid}` prevents a client from forging a rank and
+ * avoids loading every profile just to render the top contributors.
+ */
+export type CommunityStats = {
+  userId: string;
+  name: string;
+  avatarUrl: string;
+  communityScore: number;
+  postCount: number;
+  commentCount: number;
+  replyCount: number;
+  lastContributionAt: Timestamp | null;
+  updatedAt: Timestamp | null;
+};
+
 /** `aiUsage/{uid}` — the daily Gemini cap (§11.4). */
 export type AiUsage = {
   date: string;

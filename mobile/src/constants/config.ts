@@ -21,6 +21,7 @@ export const PAGE_SIZE = {
   lessons: 10,
   sessions: 10,
   posts: 10,
+  comments: 30,
   messages: 50,
   reviews: 10,
 } as const;
@@ -36,6 +37,8 @@ export const TEXT_LIMITS = {
   credentialIssuer: { min: 2, max: 80 },
   credentialDescription: 300,
   reviewComment: 500,
+  post: 1000,
+  comment: 500,
 } as const;
 
 /** Quiz / skill-test pass mark, as a percentage. */

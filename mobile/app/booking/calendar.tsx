@@ -13,7 +13,7 @@ import { LoadingState } from '@/components/ui/LoadingState';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { colors, radius, spacing, type } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
-import { requestBooking } from '@/services/bookingService';
+import { BookingScheduleConflictError, requestBooking } from '@/services/bookingService';
 import { listUpcomingSessions } from '@/services/sessionService';
 import type { Session } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
@@ -83,7 +83,12 @@ export default function BookingCalendarScreen() {
               { text: 'OK', onPress: () => router.replace('/(tabs)/sessions') },
             ]);
           } catch (requestError) {
-            Alert.alert('Could not book', errorMessage(requestError));
+            Alert.alert(
+              requestError instanceof BookingScheduleConflictError
+                ? 'Booking conflict'
+                : 'Could not book',
+              errorMessage(requestError)
+            );
           } finally {
             setActingId(null);
           }

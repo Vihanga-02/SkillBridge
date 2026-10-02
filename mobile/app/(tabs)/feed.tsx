@@ -1,3 +1,4 @@
+import { EnrollmentCount } from '@/components/lesson/EnrollmentCount';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
@@ -14,7 +15,7 @@ import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { CAREER_GOALS, type CareerGoalTag } from '@/constants/careerGoals';
 import { colors, sizes, spacing, type } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
-import { enrollInLesson, listEnrollmentIds, listLessons } from '@/services/lessonService';
+import { enrollInLesson, getLesson, listEnrollmentIds, listLessons } from '@/services/lessonService';
 import type { Lesson } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
 
@@ -64,6 +65,8 @@ export default function FeedScreen() {
     setError(null);
     try {
       await enrollInLesson(profile, lesson);
+      const refreshed = await getLesson(lesson.id);
+      if (refreshed) setLessons((rows) => rows.map((row) => row.id === lesson.id ? refreshed : row));
       setEnrolledIds((current) => new Set(current).add(lesson.id));
     } catch (enrollError) {
       setError(errorMessage(enrollError));
@@ -112,8 +115,8 @@ export default function FeedScreen() {
             {filtered.map((lesson) => {
               const isOwnLesson = lesson.teacherId === profile?.uid;
               const isEnrolled = enrolledIds.has(lesson.id);
-              const canOpen = isOwnLesson || isEnrolled;
-              const canEnroll = !!profile && profile.role !== 'teacher' && !isOwnLesson && !isEnrolled;
+              const canOpen = isEnrolled || (isOwnLesson && profile?.role === 'teacher');
+              const canEnroll = !!profile && profile.role !== 'teacher' && !isEnrolled && !lesson.deleting;
 
               return (
                 <Card key={lesson.id}>
@@ -138,15 +141,16 @@ export default function FeedScreen() {
                       <Text style={styles.caption}>
                         {lesson.contents.length} content {lesson.contents.length === 1 ? 'item' : 'items'}
                       </Text>
+                      <EnrollmentCount count={lesson.enrollmentCount} />
                       {learnerGoals.has(lesson.careerGoalId) ? (
                         <Text style={styles.match}>Your goal</Text>
                       ) : null}
                     </View>
 
                     <Button
-                      label={isOwnLesson ? 'Open lesson' : isEnrolled ? 'Continue Learning' : 'Enroll'}
+                      label={isEnrolled ? 'Continue Learning' : canOpen ? 'Open lesson' : 'Enroll'}
                       variant={canEnroll ? 'primary' : 'secondary'}
-                      icon={isEnrolled || isOwnLesson ? 'play-outline' : 'add-outline'}
+                      icon={canOpen ? 'play-outline' : 'add-outline'}
                       loading={enrollingId === lesson.id}
                       disabled={!canOpen && !canEnroll}
                       onPress={() => {

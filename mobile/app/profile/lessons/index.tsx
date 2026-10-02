@@ -1,5 +1,8 @@
+import { lessonCompletion } from '@/utils/lessonProgress';
+import { DeleteLessonButton } from '@/components/lesson/DeleteLessonButton';
+import { EnrollmentCount } from '@/components/lesson/EnrollmentCount';
 import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, type Href } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -13,7 +16,7 @@ import { Notice } from '@/components/ui/Notice';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { colors, radius, sizes, spacing, type } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
-import { deleteLesson, listEnrollmentsByUser, listLessonsByTeacher } from '@/services/lessonService';
+import { deleteLesson, listEnrollmentsByUser, listLessonsByTeacher, listLessonsByIds, refreshLessonProgress } from '@/services/lessonService';
 import type { Lesson, LessonEnrollment } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
 
@@ -22,6 +25,7 @@ type LessonTab = 'created' | 'enrolled';
 export default function MyLessonsScreen() {
   const { profile } = useAuth();
   const [createdLessons, setCreatedLessons] = useState<Lesson[]>([]);
+  const [enrolledLessons, setEnrolledLessons] = useState<Lesson[]>([]);
   const [enrollments, setEnrollments] = useState<LessonEnrollment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -44,7 +48,17 @@ export default function MyLessonsScreen() {
         canLearn ? listEnrollmentsByUser(profile.uid) : Promise.resolve([]),
       ]);
       setCreatedLessons(createdRows);
-      setEnrollments(enrolledRows.filter((enrollment) => enrollment.teacherId !== profile.uid));
+      const currentLessons = await listLessonsByIds(enrolledRows.map((row) => row.lessonId));
+      const currentById = new Map(currentLessons.map(row => [row.id, row]));
+      const reconciled = await Promise.all(enrolledRows.map(async row => {
+        const lesson = currentById.get(row.lessonId);
+        if (!lesson || lesson.deleting || !lesson.published) return row;
+        const current = lessonCompletion(lesson, row);
+        return current.progress !== row.progress || current.completed !== row.completed
+          ? refreshLessonProgress(profile, row.lessonId) : row;
+      }));
+      setEnrollments(reconciled);
+      setEnrolledLessons(currentLessons);
     } catch (loadError) {
       setError(errorMessage(loadError));
     } finally {
@@ -76,6 +90,7 @@ export default function MyLessonsScreen() {
               await deleteLesson(profile!.uid, lesson.id);
               setCreatedLessons((current) => current.filter((item) => item.id !== lesson.id));
             } catch (deleteError) {
+              await load();
               setError(errorMessage(deleteError));
             } finally {
               setDeletingId(null);
@@ -86,6 +101,7 @@ export default function MyLessonsScreen() {
     );
   }
 
+  const enrolledLessonById = new Map(enrolledLessons.map((lesson) => [lesson.id, lesson]));
   const showGlobalEmpty =
     !dualRole && !loading && createdLessons.length === 0 && enrollments.length === 0;
 
@@ -109,6 +125,16 @@ export default function MyLessonsScreen() {
             ) : undefined
           }
         />
+
+        <View style={styles.padded}>
+          <View style={styles.list}>
+            <Text style={styles.sectionTitle}>Learning Roadmaps</Text>
+            {canTeach ? <Button label="Manage Learning Roadmaps" variant="secondary" icon="map-outline"
+              onPress={() => router.push({ pathname: '/profile/roadmaps', params: { mode: 'teach' } } as Href)} /> : null}
+            {canLearn ? <Button label="My Learning Roadmaps" variant="secondary" icon="map-outline"
+              onPress={() => router.push({ pathname: '/profile/roadmaps', params: { mode: 'learn' } } as Href)} /> : null}
+          </View>
+        </View>
 
         {dualRole ? (
           <View style={styles.padded}>
@@ -174,6 +200,7 @@ export default function MyLessonsScreen() {
                           <Text style={styles.meta}>
                             {lesson.contents.length} content {lesson.contents.length === 1 ? 'item' : 'items'}
                           </Text>
+                          <EnrollmentCount count={lesson.enrollmentCount} />
 
                           <View style={styles.actions}>
                             <Button
@@ -188,10 +215,9 @@ export default function MyLessonsScreen() {
                               }
                               style={styles.actionButton}
                             />
-                            <Button
-                              label="Delete"
-                              variant="ghost"
-                              icon="trash-outline"
+                            <DeleteLessonButton
+                              count={lesson.enrollmentCount}
+                              deleting={lesson.deleting}
                               loading={deletingId === lesson.id}
                               onPress={() => confirmDelete(lesson)}
                               style={styles.actionButton}
@@ -216,29 +242,58 @@ export default function MyLessonsScreen() {
                   />
                 ) : (
                   <View style={styles.list}>
-                    {enrollments.map((enrollment) => (
-                      <Card key={enrollment.id}>
-                        <View style={styles.cardBody}>
-                          <Text style={styles.title}>{enrollment.lessonName}</Text>
-                          <Text style={styles.meta}>Career Goal: {enrollment.careerGoalName}</Text>
-                          <Text style={styles.meta}>By {enrollment.teacherName || 'SkillBridge teacher'}</Text>
-                          <Text style={styles.meta}>
-                            {enrollment.contentCount} content {enrollment.contentCount === 1 ? 'item' : 'items'}
-                          </Text>
-                          <ProgressBar
-                            progress={enrollment.progress}
-                            completed={enrollment.completed}
-                          />
-                          <Button
-                            label={enrollment.completed ? 'Review Lesson' : 'Continue Learning'}
-                            icon="play-outline"
-                            onPress={() =>
-                              router.push({ pathname: '/lesson/[id]', params: { id: enrollment.lessonId } })
-                            }
-                          />
-                        </View>
-                      </Card>
-                    ))}
+                    {enrollments.map((enrollment) => {
+                      const lesson = enrolledLessonById.get(enrollment.lessonId);
+                      const status = lesson ? lessonCompletion(lesson, enrollment) : enrollment;
+                      const contentCount = lesson?.contents.length ?? enrollment.contentCount;
+                      const reviewSubmitted =
+                        status.completed && enrollment.reviewedByLearner;
+
+                      return (
+                        <Card key={enrollment.id}>
+                          <View style={styles.cardBody}>
+                            <Text style={styles.title}>{lesson?.lessonName ?? enrollment.lessonName}</Text>
+                            <Text style={styles.meta}>Career Goal: {lesson?.careerGoalName ?? enrollment.careerGoalName}</Text>
+                            <Text style={styles.meta}>By {lesson?.teacherName || enrollment.teacherName || 'SkillBridge teacher'}</Text>
+                            <Text style={styles.meta}>
+                              {contentCount} content {contentCount === 1 ? 'item' : 'items'}
+                            </Text>
+                            <EnrollmentCount count={lesson?.enrollmentCount} />
+                            <ProgressBar
+                              progress={status.progress}
+                              completed={status.completed}
+                            />
+                            <Button
+                              label={
+                                reviewSubmitted
+                                  ? 'Open Lesson'
+                                  : status.completed
+                                    ? 'Review Lesson'
+                                    : 'Continue Learning'
+                              }
+                              icon={
+                                reviewSubmitted
+                                  ? 'eye-outline'
+                                  : status.completed
+                                    ? 'star-outline'
+                                    : 'play-outline'
+                              }
+                              variant={status.completed ? 'secondary' : 'primary'}
+                              onPress={() =>
+                                router.push({
+                                  // A submitted review must never trap the learner outside
+                                  // their completed lesson. They can still reopen its content.
+                                  pathname: reviewSubmitted || !status.completed
+                                    ? '/lesson/[id]'
+                                    : '/review/lesson/[id]',
+                                  params: { id: enrollment.lessonId },
+                                })
+                              }
+                            />
+                          </View>
+                        </Card>
+                      );
+                    })}
                   </View>
                 )}
               </View>

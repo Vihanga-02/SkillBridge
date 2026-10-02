@@ -1,3 +1,4 @@
+import { KnowledgeCheckEditor } from '@/components/lesson/KnowledgeCheckEditor';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams, type Href } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
@@ -32,7 +33,7 @@ import {
   updateLesson,
   type LessonContentInput,
 } from '@/services/lessonService';
-import type { Lesson, LessonContent } from '@/types';
+import type { Lesson, LessonContent, QuizQuestion } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
 import { formatFileSize } from '@/utils/format';
 
@@ -84,6 +85,10 @@ export default function LessonFormScreen() {
     []
   );
 
+  const [quiz, setQuiz] = useState<QuizQuestion[]>([]);
+  const [quizRevision, setQuizRevision] = useState(0);
+  const [editingQuestion, setEditingQuestion] = useState(false);
+  const [ownsLesson, setOwnsLesson] = useState(!isEditing);
   const [lessonName, setLessonName] = useState('');
   const [description, setDescription] = useState('');
   const [careerGoalId, setCareerGoalId] = useState<CareerGoalTag | null>(null);
@@ -105,6 +110,9 @@ export default function LessonFormScreen() {
         } else if (lesson.teacherId !== profile.uid) {
           setError('Only the teacher who created this lesson can edit it.');
         } else {
+          setOwnsLesson(true);
+          setQuiz(lesson.quiz ?? []);
+          setQuizRevision(lesson.quizRevision ?? 0);
           setLessonName(lesson.lessonName);
           setDescription(lesson.description ?? '');
           setCareerGoalId(lesson.careerGoalId);
@@ -197,6 +205,7 @@ export default function LessonFormScreen() {
   };
 
   const save = async () => {
+    if (saving || editingQuestion || !ownsLesson) return;
     setSaving(true);
     setError(null);
     try {
@@ -232,10 +241,10 @@ export default function LessonFormScreen() {
           lessonName,
           description,
           careerGoalId,
-          contents: inputContents,
+          contents: inputContents, quiz, quizRevision,
         });
       } else {
-        await createLesson(profile, { lessonName, description, careerGoalId, contents: inputContents });
+        await createLesson(profile, { lessonName, description, careerGoalId, contents: inputContents, quiz });
       }
 
       router.replace('/profile/lessons' as Href);
@@ -382,7 +391,10 @@ export default function LessonFormScreen() {
             </Card>
           ))}
 
+          <KnowledgeCheckEditor questions={quiz} onChange={setQuiz} onEditing={setEditingQuestion} disabled={saving || !ownsLesson} />
+          {editingQuestion ? <Notice tone="info" message="Save or cancel the question before saving the lesson." /> : null}
           <Button
+            disabled={editingQuestion || !ownsLesson}
             label={isEditing ? 'Save changes' : 'Create lesson'}
             onPress={() => void save()}
             loading={saving}

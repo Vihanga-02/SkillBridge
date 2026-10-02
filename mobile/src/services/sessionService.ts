@@ -58,10 +58,43 @@ const sessionsCol = collection(db, 'sessions');
 const toSession = (snapshot: QueryDocumentSnapshot<DocumentData>): Session =>
   ({ ...snapshot.data(), id: snapshot.id }) as Session;
 
+export class SessionScheduleConflictError extends Error {
+  constructor(conflictingSession: Session) {
+    super(
+      `You already created "${conflictingSession.title}" during this time. Choose a different time.`
+    );
+    this.name = 'SessionScheduleConflictError';
+  }
+}
+
 function parseLocalStart(date: string, time: string): Date {
   const [year, month, day] = date.split('-').map(Number);
   const [hour, minute] = time.split(':').map(Number);
   return new Date(year, month - 1, day, hour, minute, 0, 0);
+}
+
+async function assertTeacherScheduleAvailable(
+  teacherId: string,
+  proposedStart: Date,
+  durationMins: number,
+  excludedSessionId?: string
+): Promise<void> {
+  const snapshot = await getDocs(query(sessionsCol, where('teacherId', '==', teacherId)));
+  const proposedStartMs = proposedStart.getTime();
+  const proposedEndMs = proposedStartMs + durationMins * 60_000;
+
+  const conflict = snapshot.docs.map(toSession).find((session) => {
+    if (session.id === excludedSessionId || session.status === 'cancelled') return false;
+
+    const existingStartMs = session.startAt?.toMillis?.();
+    if (typeof existingStartMs !== 'number') return false;
+    const existingEndMs =
+      session.endAt?.toMillis?.() ?? existingStartMs + session.durationMins * 60_000;
+
+    return proposedStartMs < existingEndMs && proposedEndMs > existingStartMs;
+  });
+
+  if (conflict) throw new SessionScheduleConflictError(conflict);
 }
 
 export async function getSession(sessionId: string): Promise<Session | null> {
@@ -202,6 +235,8 @@ export async function createSession(teacher: User, input: CreateSessionInput): P
     throw new Error('In-person sessions need a location.');
   }
 
+  await assertTeacherScheduleAvailable(teacher.uid, startDate, input.durationMins);
+
   const startAt = Timestamp.fromDate(startDate);
   const endAt = Timestamp.fromDate(new Date(startDate.getTime() + input.durationMins * 60_000));
   const ref = doc(sessionsCol);
@@ -277,6 +312,8 @@ export async function updateSession(
   if (input.mode === 'in_person' && !input.locationText.trim()) {
     throw new Error('In-person sessions need a location.');
   }
+
+  await assertTeacherScheduleAvailable(teacher.uid, startDate, input.durationMins, sessionId);
 
   const hasBooking = await sessionHasBookingRecord(sessionId);
   const startAt = Timestamp.fromDate(startDate);

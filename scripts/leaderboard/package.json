@@ -1,0 +1,15 @@
+{
+  "name": "skillbridge-leaderboard-backfill",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "preview": "node rebuildLeaderboard.mjs --dry-run",
+    "backfill": "node rebuildLeaderboard.mjs"
+  },
+  "dependencies": {
+    "firebase-admin": "^14.5.0"
+  }
+}

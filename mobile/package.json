@@ -8,6 +8,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
+    "routes:types": "expo customize tsconfig.json",
+    "pretypecheck": "npm run routes:types",
     "typecheck": "tsc --noEmit",
     "test": "jest"
   },

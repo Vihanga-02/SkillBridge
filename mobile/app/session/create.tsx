@@ -56,6 +56,34 @@ function todayIso(): string {
   return `${y}-${m}-${d}`;
 }
 
+function suggestedDescription({
+  title,
+  skillTag,
+  level,
+  sessionType,
+  mode,
+  duration,
+}: {
+  title: string;
+  skillTag: SkillTag;
+  level: Level;
+  sessionType: SessionType;
+  mode: SessionMode;
+  duration: string;
+}): string {
+  const skill = skillLabel(skillTag);
+  const levelName = LEVEL_LABELS[level].toLowerCase();
+  const durationLabel =
+    DURATION_OPTIONS.find((option) => option.value === duration)?.label ?? `${duration} minutes`;
+  const format = sessionType === 'one_to_one' ? 'one-to-one lesson' : 'group session';
+  const delivery = mode === 'online' ? 'interactive online' : 'hands-on in-person';
+  const opening = title.trim()
+    ? `Join "${title.trim()}" for a ${durationLabel} ${levelName} ${skill} ${format}.`
+    : `Join this ${durationLabel} ${levelName} ${skill} ${format}.`;
+
+  return `${opening} This ${delivery} session will introduce key concepts through clear explanations, practical examples, and guided activities. Learners will have opportunities to ask questions, practise their skills, and build confidence.`;
+}
+
 export default function CreateSessionScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const { profile } = useAuth();
@@ -204,6 +232,32 @@ export default function CreateSessionScreen() {
     }
   }
 
+  function suggestDescription() {
+    if (!skillTag) return;
+    const suggestion = suggestedDescription({
+      title,
+      skillTag,
+      level,
+      sessionType,
+      mode,
+      duration,
+    });
+
+    if (!description.trim()) {
+      setDescription(suggestion);
+      return;
+    }
+
+    Alert.alert(
+      'Replace description?',
+      'This will replace the description currently in the form.',
+      [
+        { text: 'Keep current', style: 'cancel' },
+        { text: 'Replace', onPress: () => setDescription(suggestion) },
+      ]
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScreenHeader
@@ -234,7 +288,15 @@ export default function CreateSessionScreen() {
             onChangeText={setDescription}
             placeholder="What will learners cover?"
             multiline
+            maxLength={1000}
             autoCapitalize="sentences"
+          />
+          <Button
+            label="Suggest description"
+            icon="sparkles-outline"
+            variant="secondary"
+            disabled={!skillTag}
+            onPress={suggestDescription}
           />
 
           <ChipSelect

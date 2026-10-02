@@ -226,6 +226,17 @@ export default function SessionDetailScreen() {
           </View>
         </Card>
 
+        {session.mode === 'online' &&
+        (isTeacher || activeBooking?.status === 'confirmed') ? (
+          <Button
+            label="Join in-app meeting"
+            icon="videocam-outline"
+            onPress={() =>
+              router.push({ pathname: '/session/meeting/[id]', params: { id: session.id } })
+            }
+          />
+        ) : null}
+
         {teacherSessions.filter((item) => item.id !== session.id).map((item) => (
           <Card
             key={item.id}

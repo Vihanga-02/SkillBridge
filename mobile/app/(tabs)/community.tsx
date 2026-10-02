@@ -1,28 +1,131 @@
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { router } from 'expo-router';
+import { useEffect, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ChatListRow } from '@/components/community/ChatListRow';
+import { CommunityFeed } from '@/components/community/CommunityFeed';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { ErrorState } from '@/components/ui/ErrorState';
+import { LoadingState } from '@/components/ui/LoadingState';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
-import { colors, spacing } from '@/constants/theme';
+import { colors, radius, sizes, spacing, type } from '@/constants/theme';
+import { useAuth } from '@/hooks/useAuth';
+import { subscribeToMyChats } from '@/services/chatService';
+import type { Chat } from '@/types';
+import { errorMessage } from '@/utils/authErrors';
 
-/**
- * [M4] Placeholder from the Week 1 app shell. Member 4 replaces this with the
- * Feed / Chats tabs, post composer, chat threads and reviews.
- */
+type CommunityTab = 'feed' | 'chats';
+
+/** Community home. The feed is wired for its later post flow; the chat inbox is live now. */
 export default function CommunityScreen() {
+  const { profile } = useAuth();
+  const [activeTab, setActiveTab] = useState<CommunityTab>('chats');
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [loadingChats, setLoadingChats] = useState(true);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
+
+  useEffect(() => {
+    if (!profile) return;
+
+    setLoadingChats(true);
+    setChatError(null);
+
+    return subscribeToMyChats(
+      profile.uid,
+      (nextChats) => {
+        setChats(nextChats);
+        setLoadingChats(false);
+      },
+      (error) => {
+        setChatError(errorMessage(error));
+        setLoadingChats(false);
+      }
+    );
+  }, [profile, retryKey]);
+
+  if (!profile) {
+    return <LoadingState fullScreen label="Loading community…" />;
+  }
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <ScreenHeader title="Community" subtitle="Ask, share and message the people you learn with." />
-        <View style={styles.body}>
+      <ScreenHeader title="Community" subtitle="Share ideas and stay connected." />
+
+      <View style={styles.tabBar} accessibilityRole="tablist">
+        <CommunityTabButton
+          label="Feed"
+          selected={activeTab === 'feed'}
+          onPress={() => setActiveTab('feed')}
+        />
+        <CommunityTabButton
+          label="Chats"
+          selected={activeTab === 'chats'}
+          onPress={() => setActiveTab('chats')}
+        />
+      </View>
+
+      {activeTab === 'feed' ? (
+        <CommunityFeed />
+      ) : loadingChats ? (
+        <LoadingState label="Loading chats…" />
+      ) : chatError ? (
+        <ErrorState message={chatError} onRetry={() => setRetryKey((current) => current + 1)} />
+      ) : chats.length === 0 ? (
+        <View style={styles.empty}>
           <EmptyState
             icon="chatbubbles-outline"
-            title="Chat and the feed land here"
-            message="Member 4 builds messaging, the community feed and reviews on top of this shell"
+            title="No conversations yet"
+            message="Open a member's profile and send them a message to start a chat."
+            actionLabel="Discover members"
+            onAction={() => router.push('/discovery')}
           />
         </View>
-      </ScrollView>
+      ) : (
+        <ScrollView contentContainerStyle={styles.chatList} showsVerticalScrollIndicator={false}>
+          {chats.map((chat) => {
+            const otherUserId = chat.participantIds.find((uid) => uid !== profile.uid);
+            const otherParticipant = otherUserId ? chat.participants?.[otherUserId] : undefined;
+
+            return (
+              <ChatListRow
+                key={chat.id}
+                chat={chat}
+                currentUserId={profile.uid}
+                onPress={() =>
+                  router.push({
+                    pathname: '/chat/[id]',
+                    params: { id: chat.id, participantName: otherParticipant?.name || 'Direct message' },
+                  })
+                }
+              />
+            );
+          })}
+        </ScrollView>
+      )}
     </SafeAreaView>
+  );
+}
+
+function CommunityTabButton({
+  label,
+  selected,
+  onPress,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="tab"
+      accessibilityState={{ selected }}
+      accessibilityLabel={`${label} tab`}
+      onPress={onPress}
+      style={({ pressed }) => [styles.tab, selected && styles.tabSelected, pressed && styles.tabPressed]}>
+      <Text style={[styles.tabText, selected && styles.tabTextSelected]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -31,12 +134,44 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.bg,
   },
-  content: {
-    flexGrow: 1,
-    paddingTop: spacing.lg,
+  tabBar: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.lg,
+    padding: spacing.xs,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceAlt,
   },
-  body: {
+  tab: {
+    flex: 1,
+    minHeight: sizes.touchMin,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.sm,
+  },
+  tabSelected: {
+    backgroundColor: colors.surface,
+  },
+  tabPressed: {
+    backgroundColor: colors.accentSurface,
+  },
+  tabText: {
+    ...type.bodyStrong,
+    color: colors.inkMuted,
+  },
+  tabTextSelected: {
+    color: colors.accent,
+  },
+  chatList: {
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xxl,
+  },
+  empty: {
     flex: 1,
     justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
   },
 });

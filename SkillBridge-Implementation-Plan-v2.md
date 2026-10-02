@@ -1,7 +1,7 @@
-# SkillBridge — Implementation Plan v2.3 (Plan + Implementation Tracker)
+# SkillBridge — Implementation Plan v2.5 (Plan + Implementation Tracker)
 **SDG 4 & 8 — Community Skill-Exchange & Micro-Learning Mobile App**
 
-Stack: React Native (Expo, TypeScript, Expo Router) · Firebase (Auth + Firestore + Storage + Cloud Functions) · Gemini API
+Stack: React Native (Expo, TypeScript, Expo Router) · Firebase (Auth + Firestore + Storage) · optional later Cloud Functions + Gemini API
 Team: 4 members · Timeline: 8 weeks · Deliverable: Android APK + UX report
 
 ---
@@ -45,12 +45,27 @@ This version merges the three feature lists your group members suggested into th
 | Addition | Why |
 |---|---|
 | **Implementation audit and live tracker** | Separates what is present in the repository from the original target scope, so file existence is not mistaken for a finished feature. |
-| **Prioritized remaining-work backlog** | P0/P1/P2 priorities keep release, security and end-to-end integration ahead of AI and stretch work. |
+| **Prioritized remaining-work backlog** | P0/P1/P2 priorities keep release reliability and end-to-end integration ahead of AI and stretch work. |
 | **Low-change completeness suggestions** | Adds a few useful polish ideas that do not require a new backend domain or a major architecture change. |
+
+### Added in v2.4
+
+| Addition | Why |
+|---|---|
+| **Latest merged-development audit** | Updates the tracker after the profile-completeness, sessions/bookings and community/reputation branches were merged into `main`. |
+| **Production access controls deferred** | Detailed Firestore/Storage access-control work is no longer part of the active campus-project scope. It can be added later if deployment requirements change. |
+
+### Added in v2.5
+
+| Addition | Why |
+|---|---|
+| **Complete offline skill-verification bank** | All 32 shared-catalog skills now have 15 deterministic beginner-competency MCQs. No Gemini call, API key, quota, cache or network connection is required. |
+| **Level-sized verification tests** | A teacher's declared offered-skill level selects 5 questions for Beginner, 10 for Intermediate and all 15 for Advanced. |
+| **Verification access guards and coverage tests** | Only `teacher` / `both` accounts can test skills they actually offer; automated tests enforce catalog coverage, bank size, valid options and level counts. |
 
 ---
 
-## Implementation Status — audited 21 September 2026
+## Implementation Status — audited 23 September 2026
 
 This section is the current source of truth for progress. Sections 1–21 below remain the **target design and acceptance criteria**. A route or type existing does not count as complete unless the feature is connected to real data and reachable from the UI.
 
@@ -58,29 +73,28 @@ This section is the current source of truth for progress. Sections 1–21 below 
 
 ### Audit basis and current health
 
-The audit inspected `mobile/app`, `mobile/src`, dependencies, tests and repository configuration. It did not assume that Firebase console configuration or a deployed APK exists unless a corresponding tracked file or artefact proves it.
+The audit inspected the current development branch based on merged `main` commit `8e26afb`, including the v2.5 offline skill-verification implementation, `mobile/app`, `mobile/src`, dependencies, tests and repository configuration. It did not assume that Firebase console configuration or a deployed APK exists unless a corresponding tracked file or artefact proves it.
 
 | Check | Result | Notes |
 |---|---|---|
 | TypeScript | ✅ | `npm run typecheck` passes. |
 | ESLint | ✅ | `npm run lint` passes with no reported warnings or errors. |
-| Automated tests | 🟡 | 3 suites / 10 tests pass (register, login and deterministic chat ID), including a clean `--detectOpenHandles` run. Coverage is still very small for the implemented surface. |
-| Source structure | ✅ | 32 route files, 9 service files and the shared theme/types/catalogues are present. |
+| Automated tests | 🟡 | 5 suites / 20 tests pass (register, login, deterministic chat ID, profile completeness and complete skill-test-bank rules). Coverage is still small for the implemented surface. |
+| Source structure | ✅ | 34 route files, 10 service files and the shared theme/types/catalogues are present. |
 | Manual UI report | 🟡 | `SCRUM-43_Manual_UI_Test_Report.pdf` exists, but this code audit did not validate its test cases against the current commit. |
 | Local Firebase config | ✅ | `.env.example`, Firebase client initialization and persistent React Native auth are present; `.env` is ignored. |
-| Deployable Firebase backend config | ⬜ | No `firebase.json`, `firestore.rules`, `storage.rules` or `firestore.indexes.json` is tracked. Security and required indexes therefore cannot be reproduced or reviewed from Git. |
 | Release configuration | ⬜ | No `eas.json` or committed APK/build record is present. |
 
 ### Component progress summary
 
 | Component | Status | Implemented now | Main remaining work |
 |---|---|---|---|
-| **0. Auth & app shell** | ✅ | Register, login, reset password, persistent login, live profile context, protected routing, role-aware onboarding, logout and an extra change-password screen. | Add integration/security-rule tests and verify persistence/deep links on a release build. |
-| **1. Profile, portfolio & discovery** | 🟡 Near complete | Discovery search/filter/pagination, role and career-goal browsing, public/own profile, profile editing, avatar, skills, career goals, credentials CRUD/viewer, fallback skill tests, badges display, lesson cards, Book and Message CTAs. | Add public reviews and offered sessions inline; add Gemini-generated/cached tests and related-skill suggestions only after core work; validate private credentials with deployed rules. |
+| **0. Auth & app shell** | ✅ | Register, login, reset password, persistent login, live profile context, protected routing, role-aware onboarding, logout and an extra change-password screen. | Add broader integration tests and verify persistence/deep links on a release build. |
+| **1. Profile, portfolio & discovery** | 🟡 Near complete | Discovery search/filter/pagination, role and career-goal browsing, public/own profile, profile editing, avatar, skills, career goals, credentials CRUD/viewer, offline tests for all 32 skills with level-sized question sets, profile completeness, public reviews, badges display, lesson cards, Book and Message CTAs. | Add offered sessions inline; consider related-skill suggestions only after core work. |
 | **2. Micro-learning** | 🟡 Core flow works | Teacher lesson CRUD, multiple YouTube/PDF items, enrolment, lesson details/viewer, per-item completion, percentage progress, authored/enrolled lesson list and completion counters. | Add text/notes, flashcards, quizzes, practice content, progress dashboard/streak, full feed filters/pagination/refresh and AI generators. |
-| **3. Peer sessions** | 🟡 Core flow works | Session creation/browse/detail, teacher calendar, transactional seat booking, approve/decline/cancel/complete lifecycle, status timeline, online join link, learner review hand-off and profile stats updates. | Add edit/cancel-session UI, live session subscription, mode/date filters, attendee display, booking-to-chat CTA, credential deep-link and missing service APIs/tests. |
-| **4. Community & reputation** | 🟡 Early partial | Deterministic direct chat, real-time text thread, unread counter writes, learner-to-teacher review transaction and live aggregate rating display. | Replace placeholder Community tab with Feed/Chats, add conversation list/read state, review list/tags, teacher reviews, all post/comment/like flows, moderation and optional images. |
-| **Backend, AI & release** | ⬜ | Firebase client SDK is configured and service-layer transactions exist. | Commit/deploy rules and indexes, create Gemini proxy/quota layer, seed data, EAS profiles, APK smoke test and security attack tests. |
+| **3. Peer sessions** | 🟡 Strong core | Session create/edit/delete-before-booking, browse/detail, teaching requests/schedule/history, calendar, transactional booking, approve/decline/cancel/complete lifecycle, participant messaging, review hand-off, profile stats and teacher credit awards. | Add booked-session cancellation flow, live session subscription, mode/date filters, attendee display, credential deep-link and missing service APIs/tests. |
+| **4. Community & reputation** | 🟡 Core flow works | Feed/Chats tabs, real-time chat inbox/thread/read state, participant profile links, text posts with filters/pagination, likes/comments/deletion, review tags/list, learner review transaction and live ratings. | Add teacher-to-learner reviews or formally remove them, moderation, achievement auto-posts and optional images. |
+| **Backend, AI & release** | 🟡 Client backend works | Firebase client SDK, service validations, transactions and pagination are implemented. Skill verification is intentionally offline and does not require AI infrastructure. | Create required composite indexes, optional Gemini proxy/quota support for non-verification features, seed data, EAS profiles and APK smoke tests. Production access-control hardening is deferred. |
 
 ### Detailed tracker — Component 0 and shared foundation
 
@@ -104,13 +118,15 @@ The audit inspected `mobile/app`, `mobile/src`, dependencies, tests and reposito
 - [x] Avatar upload
 - [x] Credential add/edit/delete, public/private visibility, recount, file cleanup and viewer
 - [x] Credential image zoom, PDF open and external verification link
-- [x] Hardcoded skill-test bank, attempt recording and verified-skill update
+- [x] Offline verification bank for all 32 catalog skills: 15 deterministic MCQs per skill
+- [x] Level-sized tests: Beginner 5, Intermediate 10 and Advanced 15 questions
+- [x] Teacher/`both` role and offered-skill guards, attempt recording and verified-skill update
+- [x] Automated bank tests for catalog coverage, question counts, unique options and valid answers
 - [x] Lessons by a user, lesson enrolment/continue actions, Book and Message CTAs
+- [x] Role-aware profile-completeness checklist and next-action CTA in Me (client-derived; no schema change)
+- [x] Paginated public reviews with ratings and quick feedback tags
 - [ ] Render **sessions offered by this user** inline on the public profile
-- [ ] Render **reviews for this user** inline on the public profile
-- [ ] Add Gemini generation/cache for skills outside the fallback bank
 - [ ] Add related-skill suggestions only after P0/P1 core scope is complete
-- [ ] Prove with deployed security rules that another user cannot read a private credential directly
 
 ### Detailed tracker — Component 2
 
@@ -137,14 +153,17 @@ The audit inspected `mobile/app`, `mobile/src`, dependencies, tests and reposito
 - [x] Teacher approve/decline and learner cancel actions return seats correctly
 - [x] Teacher completion guard and participant-stat updates
 - [x] Booking status timeline, location/join-link handling and review CTA
-- [ ] Add session editing (`updateSession`) and expose `cancelSession` in the UI
+- [x] Edit or delete an open session before any learner books it
+- [x] Teaching views for requests, offered sessions, schedule and history
+- [x] Message the teacher or learner from booking detail using deterministic direct chat
+- [x] Award the teacher five Skill Credits after a completed booking
+- [ ] Add a cancellation flow for a session that already has bookings, including participant handling
 - [ ] Add mode and date filters promised by the session browser
 - [ ] Add a live `subscribeToSession` path so seats/status update without a manual reload
 - [ ] Show attendee avatars/count in session detail
-- [ ] Add **Message teacher/learner** from booking detail using the existing deterministic chat service
 - [ ] Show teacher credential count and deep-link to the profile credential section
 - [ ] Add the missing `getBookingsForSession` / reusable busy-date API and concurrency tests
-- [ ] Keep meeting links protected: the implementation uses `sessionSecrets`, so rules for that extra collection must be designed and tested
+- [ ] Confirm the `sessionSecrets` flow never exposes an online meeting link before booking approval
 
 ### Detailed tracker — Component 4
 
@@ -153,12 +172,13 @@ The audit inspected `mobile/app`, `mobile/src`, dependencies, tests and reposito
 - [x] Parent chat preview/unread counters updated with each message
 - [x] Learner-to-teacher review after a completed booking
 - [x] Transactional rating aggregate and duplicate-review prevention
-- [ ] Replace the placeholder `app/(tabs)/community.tsx` with Feed/Chats tabs
-- [ ] Add `subscribeToMyChats`, conversation rows sorted by latest message and `markChatRead`
-- [ ] Link the other participant's chat header to their profile
-- [ ] Add review tags, review queries/list UI and the public-profile reviews section
+- [x] Feed/Chats community tabs with loading, empty and error states
+- [x] Real-time chat inbox sorted by latest message, unread badges and `markChatRead`
+- [x] Link the other participant's chat header to their profile
+- [x] Review tags, paginated review queries/list UI and the public-profile reviews section
+- [x] Text post composer, filtered/paginated feed, post detail, likes, comments and author deletion
 - [ ] Decide explicitly whether teacher-to-learner reviews remain in scope; implement them or update the target model/UI to learner-only reviews
-- [ ] Add `postService`, post composer, feed, filters, detail, likes, comments and author deletion
+- [ ] Auto-create an achievement post when a learner completes a lesson, if this integration remains in scope
 - [ ] Add moderation for posts/chat before claiming the Gemini safety feature
 - [ ] Add chat/post image uploads only after the text-only community flow is stable
 
@@ -168,30 +188,27 @@ The audit inspected `mobile/app`, `mobile/src`, dependencies, tests and reposito
 - [x] Firestore writes use `serverTimestamp()`; JavaScript `Date` is used only for local parsing/comparison/display
 - [x] Core credentials, lesson progress, booking and rating operations use transactions/batches where consistency matters
 - [ ] Finish the strict theme-token audit: discovery and the shared Chip still contain a few raw numeric size/padding values
-- [ ] Add and deploy `firestore.rules`, including `sessionSecrets` and direct private-credential tests
-- [ ] Add and deploy `storage.rules` for avatars, credentials and lesson files
 - [ ] Add `firestore.indexes.json`; remove query fallbacks once required indexes are deployed
-- [ ] Complete all 18 integration contracts in §6, especially profile reviews/sessions, booking chat and achievement posts
-- [ ] Add unit/service tests for credentials, lessons, bookings, ratings and chats; add Firebase Emulator rule tests
+- [ ] Complete the remaining integration contracts in §6, especially inline profile sessions and achievement posts
+- [ ] Add unit/service tests for credentials, lessons, bookings, ratings, posts and chats
 - [ ] Add `scripts/seed.js` (the current `scripts/` directory is empty)
-- [ ] Add `firebase.json` and document emulator/deployment commands
 - [ ] Add `eas.json`, perform an Android preview build and smoke-test the APK on a real phone
 - [ ] Rehearse and record the full §15 demo journey using seeded data
 - [ ] Build the Gemini proxy and quota/cache layer only after the non-AI core journey passes
-- [ ] Keep push notifications and the credits leaderboard as stretch goals, not blockers
+- [ ] Keep push notifications and the credits leaderboard as stretch goals, not blockers; the base teacher credit award is complete
 
 ### Prioritized remaining-work backlog
 
 | Priority | Work package | Completion evidence |
 |---|---|---|
-| **P0 — release/security** | Firestore/Storage rules, indexes, `firebase.json`, emulator attack tests | Rules and indexes tracked in Git; unauthorized reads/writes fail; all app queries pass. |
-| **P0 — complete the user journey** | Community chat list, profile reviews/sessions, booking Message CTA, session edit/cancel | A new user can discover → inspect → book → approve → message → complete → review without hidden/dead-end navigation. |
+| **P0 — complete the user journey** | Inline profile sessions and handling cancellation of a session that already has bookings | A user can inspect every teacher offering and no participant is left with an active booking for a cancelled session. |
 | **P0 — demo reliability** | Seed script, EAS preview configuration, APK/device smoke test | Fresh demo data can be restored and the same build completes the demo journey on a real phone. |
 | **P1 — planned learning scope** | Quiz, flashcards, progress dashboard/streak and feed filters/pagination | A learner can consume each advertised lesson format and see durable progress. |
-| **P1 — planned community scope** | Posts, comments, likes, chat read state and profile review list | Community tab has no placeholder and every advertised social action persists. |
-| **P1 — confidence** | Service, transaction, component and security-rule tests | Critical concurrency/authorization cases run automatically, including two learners competing for the last seat. |
-| **P2 — AI** | Gemini proxy, quota/cache, generated tests/quizzes/flashcards, session drafting and moderation | No key ships in the app; offline/manual fallbacks remain usable. |
-| **P2 — stretch** | Notifications and award-only credits/leaderboard | Attempt only when every P0 and P1 acceptance journey is stable. |
+| **P1 — community completion** | Achievement auto-post integration and final decision on teacher-to-learner reviews | Advertised reputation/community behavior matches the implemented UI and report. |
+| **P1 — Firestore queries** | Create the composite indexes required by public reviews, filtered posts and ordered lists | All production queries work without temporary client-side fallbacks. |
+| **P1 — confidence** | Service, transaction and component tests | Critical concurrency cases run automatically, including two learners competing for the last seat. |
+| **P2 — optional AI** | Gemini proxy and quota support for editable lesson quiz/flashcard drafts, session drafting and moderation; skill verification stays hardcoded | No key ships in the app; every non-verification feature remains usable without AI. |
+| **P2 — stretch** | Notifications and the remaining leaderboard UI (teacher credit awards are already implemented) | Attempt only when every P0 and P1 acceptance journey is stable. |
 
 ### Small completeness improvements not in the remaining plan
 
@@ -199,7 +216,7 @@ These are deliberately low-change additions. Do not start them before P0 work.
 
 1. **Help, safety and privacy screen** — add one static route linked from the registration terms text and Me tab. Explain self-declared credentials, community conduct, privacy and how to report a problem. This closes the current dead-end T&C checkbox without a new backend.
 2. **Native Share actions** — use React Native's built-in `Share` API on profiles, lessons and sessions. It needs no new collection and makes recruitment/demo sharing much easier.
-3. **Profile-completeness checklist** — derive it client-side from avatar, bio, location, offered/wanted skills and credentials; show the next useful action in Me. No schema change is required.
+3. ✅ **Profile-completeness checklist (implemented)** — derived client-side from avatar, bio, location, role-relevant offered/wanted skills and credentials; Me shows progress, checklist state and the next useful action. No schema change was required.
 4. **Session timezone and copy-details action** — display the device timezone beside session time and let users copy/share date, location or meeting details. This avoids campus-demo confusion with little code.
 5. **In-app “What does verified mean?” explainer** — reuse the existing distinction between skill tests and self-declared credentials in a small modal/notice reachable from badges.
 
@@ -219,7 +236,7 @@ These are deliberately low-change additions. Do not start them before P0 work.
 
 **Rules of engagement (agree on this in Week 1 — it prevents 80% of merge conflicts):**
 1. You may only edit **your own** service file and **your own** screens.
-2. Shared files (`src/types/index.ts`, `src/constants/skills.ts`, `src/constants/careerGoals.ts`, `src/constants/theme.ts`, `firestore.rules`, `app/_layout.tsx`, `src/components/ui/`) change **only via Pull Request**, and you post in the group chat before merging.
+2. Shared files (`src/types/index.ts`, `src/constants/skills.ts`, `src/constants/careerGoals.ts`, `src/constants/theme.ts`, `app/_layout.tsx`, `src/components/ui/`) change **only via Pull Request**, and you post in the group chat before merging.
 3. If you need data another member owns, you **read** their collection directly (Firestore has no joins — reading is fine). You never **write** to a collection you don't own, except through the owner's service function.
 4. Never rename a Firestore field after Week 2 without telling the team. There is no compile-time check — a typo just silently returns zero results.
 
@@ -256,7 +273,7 @@ npm install date-fns                       # date formatting/relative time
 
 - **Expo managed workflow** — no Android Studio / Xcode needed, everyone tests on their own phone via Expo Go.
 - **Expo Router** — file-based routing, identical mental model to Next.js `app/`.
-- **Firebase instead of Express + PostgreSQL** — this module is graded on UX. Firebase removes server hosting, ORM, and migrations, none of which earn marks here. Security rules become your "backend validation layer" and *are* markable work.
+- **Firebase instead of Express + PostgreSQL** — this module is graded on UX. Firebase removes server hosting, ORM, and migrations, while the client service layer keeps validation and transactions in one place for this campus prototype.
 - **One Cloud Function only** (for Gemini) — see §11. Everything else runs client-side through the service layer.
 
 ### 2.3 Prerequisites checklist
@@ -282,7 +299,7 @@ npm install date-fns                       # date formatting/relative time
 6. **Project settings → Users and permissions** → add all 4 member Google accounts as **Editor**, so everyone sees the same live data in the console.
 7. Create **one shared `.env`** (pinned in your group chat, never committed) so all 4 members hit the same project.
 
-> ⚠️ **Test mode expires after 30 days** and then blocks all reads/writes. Set a calendar reminder for Week 4 to deploy the real rules (§9). Every year some group's demo dies from this.
+> Before the final demonstration, confirm that the shared Firebase project still permits the reads, writes and uploads used by the app. Production access-control hardening is deferred from the current campus-project scope (§9).
 
 **`.env`** (add to `.gitignore` immediately):
 ```
@@ -465,7 +482,7 @@ user + onboardingComplete  → redirect to /(tabs)/discovery
 | `app/profile/credentials/index.tsx` | **My Credentials** — the teacher's own manage list, grouped by skill. Add / edit / delete, visibility toggle, recount action. Only reachable when `role` is `teacher` or `both`. |
 | `app/profile/credentials/add.tsx` | Add or edit one credential: type, title, issuer, the skill it backs, dates, reference number, verification URL, file upload. |
 | `app/credential/[id].tsx` | **Credential viewer** — full screen. Images pinch-to-zoom; PDFs open in `WebBrowser`. Shows issuer, dates, reference number, and an "Open verification link" button when one was supplied. This is the screen learners land on. |
-| `app/profile/skill-test/[skill].tsx` | Skill Verification Test: 3–5 questions for that skill, submit answers, get pass/fail, on pass adds the skill to `verifiedSkills`. Questions generated by Gemini (§11) with a hardcoded fallback bank for the top 8 skills so the demo never depends on the network. |
+| `app/profile/skill-test/[skill].tsx` | Offline Skill Verification Test for `teacher` / `both` accounts. The skill must be in `skillsOffered`; its declared level selects 5 Beginner, 10 Intermediate or 15 Advanced questions from a 15-question local bank. Submit answers, get pass/fail, and on pass add the skill to `verifiedSkills`. No Gemini call is used. |
 | `app/(tabs)/me.tsx` *(optional 5th tab)* | Own profile shortcut + Logout + links to My Bookings / My Lessons / My Credentials. Can also live as a header avatar button. |
 
 #### `src/services/userService.ts`
@@ -515,7 +532,7 @@ Both are updated in the same `updateDoc` call. Every other component queries the
 `users/{uid}/credentials/{credentialId}`. This is a deliberate choice and worth being able to justify in the viva:
 
 - **The user document is the hottest read in the app.** Every Discovery card, every lesson author, every session card reads it. Adding an array of certificate metadata and URLs would slow the most-read document in the project down, for data needed on exactly one screen.
-- **The security rule falls out of the path for free** — only `request.auth.uid == uid` can write to `users/{uid}/credentials/...`. There's no `ownerId` field to validate and no way to forge one.
+- **Ownership is clear from the path** — credential service calls always use `users/{uid}/credentials/...`, so the owner UID is explicit and no separate `ownerId` field can drift out of sync.
 - **Documents can be added and removed independently.** Two rapid writes to the same array can clobber each other; two writes to different subcollection documents cannot.
 - **The cost is one extra query on one screen.** The profile is already doing four reads; a fifth is free.
 
@@ -523,7 +540,7 @@ Both are updated in the same `updateDoc` call. Every other component queries the
 
 | Signal | Where it comes from | What it actually means |
 |---|---|---|
-| **Verified skill badge** (`verifiedSkills`) | The user passed SkillBridge's own AI-generated skill test | *The app tested them.* |
+| **Verified skill badge** (`verifiedSkills`) | The user passed SkillBridge's own offline, hardcoded skill test | *The app tested them.* |
 | **Credential** (this feature) | The teacher uploaded a document and typed its details | *They claim it and supplied evidence — the learner judges it.* |
 
 Render them differently: a filled ✔ badge for the app-verified one, an outlined document chip for a credential. Label credentials **"Self-declared"** in the viewer. There is no admin panel in scope to approve them, so the app must never imply it verified something it didn't. State this in the report; admin or peer verification is named as future work.
@@ -595,7 +612,7 @@ Tapping a row opens `credential/[id]`. Skills with zero credentials still appear
 
 #### Optional AI hook
 
-Gemini 2.5 Flash accepts images. A "Scan certificate" action could send the photo and get back `{ title, issuer, issueDate }` as JSON to pre-fill the form. Genuinely nice, but it means pushing image bytes through the Cloud Function — so it's listed as feature #7 in §11.3 and should only be attempted after the six text-only AI features work.
+Gemini 2.5 Flash accepts images. A "Scan certificate" action could send the photo and get back `{ title, issuer, issueDate }` as JSON to pre-fill the form. Genuinely nice, but it means pushing image bytes through the Cloud Function — so it remains optional and should only be attempted after the core non-AI journey and any higher-priority AI drafts work.
 
 ---
 
@@ -1068,11 +1085,11 @@ A **subcollection**, not an array on the user doc — see §5.1.1 for why. Writt
 |---|---|---|
 | `userId` | string | |
 | `skillTag` | string | |
-| `questions` | `{ q, type, options?, answer }[]` | as generated/served |
+| `questions` | `{ q, type, options?, answer }[]` | locally served subset for the offered-skill level |
 | `answers` | string[] | what the user submitted |
 | `score` | number | 0–100 |
 | `passed` | boolean | `score >= 60` |
-| `source` | `'gemini' \| 'fallback'` | shows the AI actually ran |
+| `source` | `'hardcoded'` | current implementation; legacy documents may still contain `'fallback'` or `'gemini'` |
 | `createdAt` | T | |
 
 ### `lessons/{lessonId}` — owner: Member 2
@@ -1137,7 +1154,7 @@ Composite doc ID makes progress idempotent — no duplicate rows, no query neede
 | `sessionId` / `sessionTitle` / `skillTag` / `startAt` / `durationMins` / `mode` / `meetingLink` / `locationText` | | **denorm** from the session — so "My Bookings" renders with zero extra reads |
 | `teacherId` / `teacherName` / `teacherAvatarUrl` | string | **denorm** |
 | `learnerId` / `learnerName` / `learnerAvatarUrl` | string | **denorm** |
-| `participantIds` | `[teacherId, learnerId]` | single-query "my bookings", and drives the security rule |
+| `participantIds` | `[teacherId, learnerId]` | single-query "my bookings" and shared participant checks |
 | `note` | string | learner's message when requesting |
 | `status` | `'pending' \| 'confirmed' \| 'declined' \| 'cancelled' \| 'completed'` | |
 | `cancelReason` | string | optional |
@@ -1161,7 +1178,7 @@ Composite doc ID makes progress idempotent — no duplicate rows, no query neede
 
 | Field | Type | Notes |
 |---|---|---|
-| `participantIds` | string[] (length 2) | `array-contains` + security rule |
+| `participantIds` | string[] (length 2) | `array-contains` query + shared participant checks |
 | `participants` | `{ [uid]: { name, avatarUrl } }` | **map, not parallel arrays** — v1's parallel arrays make "who is the other person?" awkward |
 | `lastMessage` / `lastSenderId` | string | |
 | `lastMessageAt` | T | list sort key |
@@ -1210,7 +1227,7 @@ Copy a field into another document **only when a list screen needs it without an
 
 ---
 
-## 8. Firebase Storage — Layout, Ownership & Rules
+## 8. Firebase Storage — Layout & Ownership
 
 | Path | Component | Content | Limit to enforce client-side |
 |---|---|---|---|
@@ -1243,189 +1260,9 @@ export async function uploadFile(path: string, localUri: string, maxBytes: numbe
 export const deleteFile = (path: string) => deleteObject(ref(storage, path));
 ```
 
-### `storage.rules`
+## 9. Deferred Production Hardening
 
-```
-rules_version = '2';
-service firebase.storage {
-  match /b/{bucket}/o {
-    match /avatars/{userId} {
-      allow read:  if request.auth != null;
-      allow write: if request.auth != null
-                   && request.auth.uid == userId.split('[.]')[0]
-                   && request.resource.size < 2 * 1024 * 1024
-                   && request.resource.contentType.matches('image/.*');
-    }
-    // Credentials: the {userId} path segment IS the authorisation check —
-    // nobody can write into another user's credential folder.
-    match /credentials/{userId}/{file} {
-      allow read:  if request.auth != null;
-      allow write: if request.auth != null
-                   && request.auth.uid == userId
-                   && request.resource.size < 5 * 1024 * 1024
-                   && (request.resource.contentType.matches('image/.*')
-                       || request.resource.contentType == 'application/pdf');
-    }
-    match /lessons/{lessonId}/{file} {
-      allow read:  if request.auth != null;
-      allow write: if request.auth != null && request.resource.size < 50 * 1024 * 1024;
-    }
-    match /sessions/{sessionId}/{file} {
-      allow read:  if request.auth != null;
-      allow write: if request.auth != null && request.resource.size < 2 * 1024 * 1024;
-    }
-    match /chats/{chatId}/{file} {
-      allow read:  if request.auth != null;
-      allow write: if request.auth != null && request.resource.size < 5 * 1024 * 1024;
-    }
-    match /posts/{postId}/{file} {
-      allow read:  if request.auth != null;
-      allow write: if request.auth != null && request.resource.size < 5 * 1024 * 1024;
-    }
-  }
-}
-```
-
-> Storage rules **cannot read Firestore**, so "only the lesson owner may upload" can't be enforced there. Enforce it in the service layer and note the gap in the report — knowing *why* a rule can't be written is itself a good report point.
-
----
-
-## 9. Firestore Security Rules (deploy by end of Week 4)
-
-```
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-
-    function signedIn()      { return request.auth != null; }
-    function isSelf(uid)     { return signedIn() && request.auth.uid == uid; }
-    function unchanged(f)    { return request.resource.data[f] == resource.data[f]; }
-
-    match /users/{userId} {
-      allow read: if signedIn();
-      allow create: if isSelf(userId);
-      // A user may edit their own profile, but NOT their own rating —
-      // only the review transaction may change ratingAvg / ratingCount.
-      allow update: if isSelf(userId)
-                    && unchanged('ratingAvg')
-                    && unchanged('ratingCount')
-        // ...except when another user's review transaction updates exactly those fields:
-        || (signedIn()
-            && request.resource.data.diff(resource.data).affectedKeys()
-                 .hasOnly(['ratingAvg','ratingCount','stats','credits','badges']));
-      allow delete: if false;
-
-      // Credentials — the {userId} path segment is the whole authorisation story.
-      // Anyone signed in may READ (a learner checking a teacher before booking);
-      // only the profile owner may write.
-      match /credentials/{credentialId} {
-        // 'private' credentials are enforced HERE, not just by hiding them in the UI
-        allow read: if signedIn()
-                    && (resource.data.visibility == 'public' || isSelf(userId));
-        allow create: if isSelf(userId)
-                      && request.resource.data.userId == request.auth.uid
-                      && request.resource.data.title.size() >= 3
-                      && request.resource.data.title.size() <= 120
-                      && request.resource.data.verificationStatus == 'self_declared';
-        allow update, delete: if isSelf(userId);
-      }
-    }
-
-    match /skillTests/{testId} {
-      allow read:   if signedIn() && resource.data.userId == request.auth.uid;
-      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if false;
-    }
-
-    match /lessons/{lessonId} {
-      allow read: if signedIn();
-      allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid;
-      allow update: if signedIn() && (
-                      resource.data.ownerId == request.auth.uid
-                      || request.resource.data.diff(resource.data).affectedKeys()
-                           .hasOnly(['viewCount','completeCount'])   // anyone may bump counters
-                    );
-      allow delete: if signedIn() && resource.data.ownerId == request.auth.uid;
-    }
-
-    match /lessonProgress/{progressId} {
-      allow read, write: if signedIn()
-                    && progressId.split('_')[0] == request.auth.uid;
-    }
-
-    match /sessions/{sessionId} {
-      allow read: if signedIn();
-      allow create: if signedIn() && request.resource.data.teacherId == request.auth.uid
-                    && request.resource.data.seatsTaken == 0;
-      allow update: if signedIn() && (
-                      resource.data.teacherId == request.auth.uid
-                      || request.resource.data.diff(resource.data).affectedKeys()
-                           .hasOnly(['seatsTaken','status'])          // booking transaction
-                    );
-      allow delete: if signedIn() && resource.data.teacherId == request.auth.uid;
-    }
-
-    match /bookings/{bookingId} {
-      allow read: if signedIn() && request.auth.uid in resource.data.participantIds;
-      allow create: if signedIn()
-                    && request.resource.data.learnerId == request.auth.uid
-                    && request.resource.data.status == 'pending'
-                    && request.resource.data.teacherId != request.auth.uid;
-      allow update: if signedIn() && request.auth.uid in resource.data.participantIds;
-      allow delete: if false;   // cancel by status change, never delete — keeps the audit trail
-    }
-
-    match /reviews/{reviewId} {
-      allow read: if signedIn();
-      allow create: if signedIn()
-                    && request.resource.data.fromUserId == request.auth.uid
-                    && request.resource.data.rating >= 1
-                    && request.resource.data.rating <= 5;
-      allow update, delete: if false;
-    }
-
-    match /chats/{chatId} {
-      allow read:   if signedIn() && request.auth.uid in resource.data.participantIds;
-      allow create: if signedIn() && request.auth.uid in request.resource.data.participantIds;
-      allow update: if signedIn() && request.auth.uid in resource.data.participantIds;
-
-      match /messages/{messageId} {
-        allow read: if signedIn()
-              && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId))
-                   .data.participantIds;
-        allow create: if signedIn()
-              && request.resource.data.senderId == request.auth.uid;
-        allow update, delete: if false;
-      }
-    }
-
-    match /posts/{postId} {
-      allow read: if signedIn();
-      allow create: if signedIn() && request.resource.data.authorId == request.auth.uid;
-      allow update: if signedIn() && (
-                      resource.data.authorId == request.auth.uid
-                      || request.resource.data.diff(resource.data).affectedKeys()
-                           .hasOnly(['likedBy','likeCount','commentCount'])
-                    );
-      allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
-
-      match /comments/{commentId} {
-        allow read: if signedIn();
-        allow create: if signedIn() && request.resource.data.authorId == request.auth.uid;
-        allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
-      }
-    }
-
-    match /aiUsage/{userId} { allow read, write: if isSelf(userId); }
-  }
-}
-```
-
-Deploy: `firebase deploy --only firestore:rules,storage` (or paste into the console → Rules tab).
-
-> **Query constraint the credential rule forces on you:** because `allow read` checks `resource.data.visibility == 'public'`, a query listing *another* user's credentials **must** include `where('visibility', '==', 'public')` or Firestore rejects the whole query — rules are evaluated against the query, not the results. That's why §10 lists a `visibility + skillTag + issueDate` index. When listing your *own* credentials, drop the filter so private ones show too.
-
-> **Test your rules like an attacker in Week 7.** Log in as User A and try to: edit User B's profile, read a booking you're not part of, write your own `ratingAvg`, post as someone else, **write a credential into User B's subcollection**, and **read User B's private credential**. If any succeeds, the rule is wrong. Screenshot these attempts for the report — it's exactly the "backend security" evidence the marking scheme wants.
+Production-grade server-side access controls are intentionally outside the active campus-project scope. The current prototype relies on Firebase project settings plus validation and ownership checks in the client service layer. Revisit this only if publication, assessment requirements or wider external testing make it necessary.
 
 ---
 
@@ -1433,23 +1270,16 @@ Deploy: `firebase deploy --only firestore:rules,storage` (or paste into the cons
 
 Firestore auto-handles single-field indexes; any query mixing a filter with a different `orderBy` needs a composite index. **You don't have to write these by hand** — run the query, and Firestore throws an error containing a "click here to create the index" link. Click it. But knowing the list up front stops you from panicking during integration week:
 
-| Collection | Fields |
-|---|---|
-| `users` | `skillTagsOffered` (array-contains) + `ratingAvg` desc |
-| `users` | `role` == + `ratingAvg` desc |
-| `users/{uid}/credentials` | `visibility` == + `skillTag` == + `issueDate` desc |
-| `users/{uid}/credentials` | `visibility` == + `issueDate` desc |
-| `lessons` | `skillTag` == + `createdAt` desc |
-| `lessons` | `category` == + `level` == + `createdAt` desc |
-| `lessons` | `ownerId` == + `createdAt` desc |
-| `sessions` | `status` == + `startAt` asc |
-| `sessions` | `skillTag` == + `status` == + `startAt` asc |
-| `sessions` | `teacherId` == + `startAt` asc |
-| `bookings` | `participantIds` (array-contains) + `startAt` desc |
-| `bookings` | `sessionId` == + `createdAt` asc |
-| `reviews` | `toUserId` == + `createdAt` desc |
-| `chats` | `participantIds` (array-contains) + `lastMessageAt` desc |
-| `posts` | `type` == + `createdAt` desc |
+| Priority | Collection | Fields | Current behavior without it |
+|---|---|---|---|
+| Required | `reviews` | `toUserId` == + `createdAt` desc | Public profile review list fails. |
+| Required | `chats` | `participantIds` (array-contains) + `lastMessageAt` desc | Chat inbox subscription fails. |
+| Recommended | `posts` | `type` == + `createdAt` desc | Filter works through a client-sort fallback, but filtered pagination is disabled. |
+| Recommended | `bookings` | `participantIds` (array-contains) + `startAt` desc | Bookings fall back to client-side sorting. |
+| Recommended | `sessions` | `teacherId` == + `startAt` asc/desc | Teacher sessions fall back to client-side sorting. |
+| Recommended | `lessons` | `published` == + `updatedAt` desc | Lesson feed falls back to client-side sorting. |
+| Recommended | `lessons` | `teacherId` == + `updatedAt` desc | Teacher lesson list falls back to client-side sorting. |
+| Recommended | `lessonEnrollments` | `userId` == + `updatedAt` desc | Enrolments fall back to client-side sorting. |
 
 Index builds take 1–3 minutes. **Create all of these by end of Week 5**, not on demo day.
 
@@ -1534,26 +1364,27 @@ firebase deploy --only functions
 }
 ```
 
-### 11.3 The AI features — one function, six prompt templates (plus two optional)
+### 11.3 Optional AI features — skill verification is explicitly excluded
+
+The Member 1 skill-verification test is now deliberately offline: 15 reviewed local questions exist for every catalog skill, and 5/10/15 are served by declared level. Do not add Gemini generation, caching or quota use back into that flow. It adds cost and failure modes without improving this campus-project assessment.
 
 | # | Component | Feature | Prompt (abbreviated) | UI |
 |---|---|---|---|---|
-| 1 | **M1** | **Skill Verification Test** | "Generate 4 multiple-choice questions testing basic competency in {skill}, difficulty {level}. Return JSON." | `profile/skill-test/[skill].tsx` — pass ≥ 60% → `verifiedSkills` badge appears on the profile |
-| 2 | **M1** | **Related-skill suggestions** | "A user can teach {skills}. Suggest 5 related skills they might also teach, from this list: {SKILLS}. Return JSON array of tags." | Chips under the skill editor: "You might also teach…" |
-| 3 | **M2** | **Quiz generator from lesson text** | "From this lesson content, write 5 MCQs with 4 options each. Content: {content}. Return JSON." | "✨ Generate quiz" button on `lesson/create` — teacher can edit before saving |
-| 4 | **M2** | **Flashcard generator** | "Convert these notes into up to 12 flashcards as `{front, back}` pairs. Notes: {notes}. Return JSON." | "✨ Generate flashcards" on `lesson/create` |
-| 5 | **M3** | **Session description drafter** | "Write a friendly 60-word session description and 4 bullet-point agenda for a {duration}-min {level} session on {skill}. Return JSON `{description, agenda[]}`." | "✨ Draft with AI" on `session/create` |
-| 6 | **M4** | **Content moderation** | "Does this message contain harassment, hate speech, or spam? Reply only `SAFE` or `UNSAFE`. Message: {text}" | Runs before saving a post or chat message; `UNSAFE` → block + show a warning, save `moderation: 'flagged'` |
-| 7 | **M1** *(optional, do last)* | **Certificate scanner** | Send the uploaded credential image and ask: "Extract the certificate title, issuing organisation and issue date. Return JSON `{title, issuer, issueDate}`." | "✨ Scan certificate" on `credentials/add` — pre-fills the form, user edits before saving. Needs image bytes through the Cloud Function, so it's more work than the six above — build it only once they all work. |
+| 1 | **M1** | **Related-skill suggestions** | "A user can teach {skills}. Suggest 5 related skills they might also teach, from this list: {SKILLS}. Return JSON array of tags." | Chips under the skill editor: "You might also teach…" |
+| 2 | **M2** | **Quiz generator from lesson text** | "From this lesson content, write 5 MCQs with 4 options each. Content: {content}. Return JSON." | "✨ Generate quiz" button on `lesson/create` — teacher can edit before saving |
+| 3 | **M2** | **Flashcard generator** | "Convert these notes into up to 12 flashcards as `{front, back}` pairs. Notes: {notes}. Return JSON." | "✨ Generate flashcards" on `lesson/create` |
+| 4 | **M3** | **Session description drafter** | "Write a friendly 60-word session description and 4 bullet-point agenda for a {duration}-min {level} session on {skill}. Return JSON `{description, agenda[]}`." | "✨ Draft with AI" on `session/create` |
+| 5 | **M4** | **Content moderation** | "Does this message contain harassment, hate speech, or spam? Reply only `SAFE` or `UNSAFE`. Message: {text}" | Runs before saving a post or chat message; `UNSAFE` → block + show a warning, save `moderation: 'flagged'` |
+| 6 | **M1** *(optional, do last)* | **Certificate scanner** | Send the uploaded credential image and ask: "Extract the certificate title, issuing organisation and issue date. Return JSON `{title, issuer, issueDate}`." | "✨ Scan certificate" on `credentials/add` — pre-fills the form, user edits before saving. Needs image bytes through the Cloud Function, so build it only after the core flow is stable. |
 | ⭐ | **Cross-cutting** | **AI Learning Assistant** | System prompt: "You are SkillBridge's learning assistant. Help with study questions concisely. If asked something unrelated to learning, politely redirect." | New route `app/assistant.tsx` — `GiftedChat` UI (M4's library, reused), reachable from a floating action button on the feed |
 
-**Every one of these must have a fallback.** Wrap each call in try/catch: on failure, hide the AI button or fall back to a hardcoded question bank / manual entry. Your demo must work with the Wi-Fi off — an AI feature that crashes the app on stage costs more marks than not having it.
+**Every optional AI feature must have a fallback.** Wrap each call in try/catch: on failure, hide the AI button or use manual entry. Your demo must work with the Wi-Fi off — an AI feature that crashes the app on stage costs more marks than not having it.
 
 Also: show a spinner with a real label ("Generating your quiz…"), and always let the user **edit** the AI output before saving. AI-as-a-draft, never AI-as-final — that's a genuine UX argument you can defend in the viva.
 
 ### 11.4 Cost & quota control
 - Cap each user at ~20 AI calls/day via `aiUsage/{uid}`.
-- Cache generated skill tests: check `skillTests` for an existing question set for that skill before calling Gemini again.
+- Skill-verification tests never call Gemini and therefore consume no AI quota.
 - Truncate `content` to ~4000 characters before sending.
 - Disable the assistant chat's history beyond the last 6 messages.
 
@@ -1575,10 +1406,10 @@ Every trigger already exists in Components 3 and 4 — you're reacting to data, 
 ### 12.2 Skill Credits + Leaderboard (the "SDG 8" story) ⭐
 Directly supports the "exchange skills instead of money" idea from your group's list, without building an economy.
 
-- `users.credits` already exists (starts at 10)
-- In `markCompleted`: teacher `+5`, learner `-2` (never below 0)
-- Show a credit balance chip in the profile header and a "+5 credits" toast on completion
-- `app/leaderboard.tsx` — `orderBy('stats.sessionsTaught', 'desc').limit(20)`, top 3 highlighted
+- [x] `users.credits` exists and starts at 10
+- [x] `markCompleted` awards the teacher `+5` credits without blocking learner bookings
+- [x] Me shows the credit balance and booking completion shows a `+5 Skill Credits` message
+- [ ] `app/leaderboard.tsx` — `orderBy('stats.sessionsTaught', 'desc').limit(20)`, top 3 highlighted
 - **Deliberately skip** "must spend credits to book" — it blocks your demo flow the moment an account runs out. Award-only is the smart scope cut, and say so in the report.
 
 **Explicitly out of scope (list these as "Future Work" in the report):** admin web panel, geolocation/nearby events, offline mode, dark mode, full credit economy, video calling inside the app (use external Zoom/Meet links), **admin or peer verification of uploaded credentials** (uploading and viewing them *is* in scope — see §5.1.1; only third-party approval is not), auto-generated completion certificates, full-text search.
@@ -1808,11 +1639,7 @@ skillbridge/
 │
 ├── .gitignore                              [S]  .env, node_modules, .expo, *.log, serviceAccountKey.json
 ├── README.md                               [S]  setup steps, env var list, who owns what
-├── firebase.json                           [S]  links rules + indexes + functions to the project
-├── .firebaserc                             [S]  project alias
-├── firestore.rules                         [S]  §9 — PR only
 ├── firestore.indexes.json                  [S]  §10 — generated by the CLI, committed
-├── storage.rules                           [S]  §8 — PR only
 │
 ├── scripts/
 │   ├── seed.js                             [S]  Admin-SDK demo data: 6 users, credentials,
@@ -1964,7 +1791,8 @@ skillbridge/
     │   │   ├── theme.ts                    [S]  §13 — colours, spacing, radius, type, shadow
     │   │   ├── skills.ts                   [S]  §6.1 — THE shared skill taxonomy
     │   │   ├── careerGoals.ts              [S]  §6.2 / §5.1.2 — career goal catalog + helpers
-    │   │   ├── skillTestBank.ts            [M1] offline fallback questions for skill tests
+    │   │   ├── skillTestBank.ts            [M1] deterministic MCQ builder + 5/10/15 level selection
+    │   │   ├── skillQuizData/              [M1] 15 reviewed offline concepts for every catalog skill
     │   │   └── config.ts                   [S]  file size caps, page sizes, AI daily quota
     │   │
     │   ├── types/
@@ -2008,7 +1836,7 @@ skillbridge/
 | Shared UI (`components/ui/`) | 13 | M4 |
 | Component-specific components | ~19 | 4–5 each |
 | Constants / types / utils / hooks | 12 | shared |
-| Config, rules, functions, scripts | 12 | shared |
+| Config, optional AI functions, scripts | ~9 | shared |
 
 Roughly **95 files**. If your repo is drifting well past that, someone is building something that isn't in this plan — check before the sprint ends, not during integration week.
 
@@ -2036,10 +1864,10 @@ so a mistyped tag becomes a *compile* error instead of a query that silently ret
 | **1** | Firebase project, repo, Expo app, **Auth built together**, `types/index.ts` + `constants/skills.ts` + `constants/careerGoals.ts` + **`theme.ts` (§13) agreed and merged before any screen** | Onboarding wizard (incl. career goal step) | — | — | Shared UI components, built against the theme |
 | **2** | Data model frozen. Tab shell wired. | `userService` + discovery list (category + career-goal browse) | `lessonService` + feed list | `sessionService` + browse list | `chatService` + chat list |
 | **3** | Mid-point demo to each other (raw UI, real data) | Profile detail + edit (career goals + skills) | Lesson viewer + create | Session create + detail | Chat screen (GiftedChat) |
-| **4** | **Deploy real security rules.** Re-test every screen. | Avatar upload + search/filters (All / Teachers / Learners) | Media upload + flashcards | `requestBooking` transaction + calendar | Reviews + rating transaction |
+| **4** | Re-test the full real-data journey and fix integration failures. | Avatar upload + search/filters (All / Teachers / Learners) | Media upload + flashcards | `requestBooking` transaction + calendar | Reviews + rating transaction |
 | **5** | Create all composite indexes. Freeze new features. | **Credentials (§5.1.1)** + **Career goals (§5.1.2)** polish + skill test screen | Quiz runner + progress dashboard | Approve/decline/complete flow | Community feed + posts |
 | **6** | **Integration week** — wire all 18 touch points in §6. Full journey end-to-end. **Theme audit: grep every screen file for a raw `#` hex value and remove it.** | | | | |
-| **7** | AI features (§11) + **usability testing with 5 outside users** + rule-breaking security tests | Feature 1 & 2 (7 only if time) | Feature 3 & 4 | Feature 5 | Feature 6 + assistant |
+| **7** | Optional AI features (§11) + **usability testing with 5 outside users** + regression testing | Feature 1 (6 only if time; skill verification remains offline) | Feature 2 & 3 | Feature 4 | Feature 5 + assistant |
 | **8** | Polish, seed demo data, build APK, write report, rehearse the demo twice | | | | |
 
 **Weeks 6–8 are non-negotiable.** Every group underestimates integration. If you're behind in Week 5, cut features (session covers, chat images, post images, video upload) — never cut integration week.
@@ -2107,7 +1935,7 @@ eas build -p android --profile preview     # produces an installable .apk
 Do a **test build in Week 6**, not Week 8. First builds fail for boring config reasons and the queue can take 30+ minutes.
 
 ### 17.9 Report artefacts to collect as you go
-Screenshots of every screen · the Firestore collection diagram (your ER-diagram equivalent, with arrows for which field references which collection, including the `credentials` subcollection) · **the 60:30:10 palette swatch sheet and the contrast table from §13.3** · **one screenshot annotated with its 60/30/10 breakdown** · security-rule attack attempts and their denials · usability test notes from 5 outside users · a "why Firebase over Express/PostgreSQL for a UX-graded module" paragraph · known limitations (stale denormalized names, prefix-only search, self-declared credentials with no admin verification, client-side AI key if you chose option C).
+Screenshots of every screen · the Firestore collection diagram (your ER-diagram equivalent, with arrows for which field references which collection, including the `credentials` subcollection) · **the 60:30:10 palette swatch sheet and the contrast table from §13.3** · **one screenshot annotated with its 60/30/10 breakdown** · booking/ratings transaction test evidence · usability test notes from 5 outside users · a "why Firebase over Express/PostgreSQL for a UX-graded module" paragraph · known limitations (stale denormalized names, prefix-only search, self-declared credentials with no admin verification, deferred production hardening, and a client-side AI key if you chose option C).
 
 ---
 
@@ -2121,7 +1949,6 @@ Tick all of these before you say your component is finished:
 - [ ] My service functions are all called from the UI — no dead code
 - [ ] All `onSnapshot` listeners are cleaned up in `useEffect` returns
 - [ ] My writes use `serverTimestamp()`, never `new Date()`
-- [ ] My queries work **after** the real security rules are deployed (not just in test mode)
 - [ ] Required composite indexes are created in the console
 - [ ] I only read (never write) collections owned by other members
 - [ ] All my skill tags/categories come from `constants/skills.ts` (and career goal tags from `constants/careerGoals.ts` if I touch goals)
@@ -2135,7 +1962,7 @@ Tick all of these before you say your component is finished:
 - [ ] The credentials section is hidden for `role: 'learner'` and appears immediately when the role is changed
 - [ ] A learner on someone else's profile can open a credential and see the actual file
 - [ ] Deleting a credential removes the Storage file, the document, **and** decrements both counters
-- [ ] A `private` credential is invisible to other users **when queried directly via the SDK**, not just hidden in the UI
+- [ ] Public-profile credential queries include `visibility == 'public'`; the owner view can still show private credentials
 - [ ] Career-goal / wanted-skill UI is hidden for `role: 'teacher'`; skills-offered UI is hidden for `role: 'learner'`
 - [ ] Saving career goals recomputes `skillsWanted` / `skillTagsWanted` via `deriveWantedSkills` — M2/M3 can still default filters off those fields
 - [ ] Discovery Browse-by Career goal returns teachers who offer any skill in that goal's curriculum
@@ -2145,7 +1972,7 @@ Tick all of these before you say your component is finished:
 
 ## 19. Risk Checklist (review every Monday)
 
-- [ ] Is Firestore still in test mode? (**expires 30 days after creation — kills your demo silently**)
+- [ ] Can the final demo accounts still read, write and upload successfully in the shared Firebase project?
 - [ ] Does everyone agree on the exact field names? Any query returning `[]` is a typo until proven otherwise.
 - [ ] Are all composite indexes created, and did they finish building?
 - [ ] Is the booking transaction actually preventing overbooking? Test it: two phones, one seat, tap simultaneously.
@@ -2156,7 +1983,7 @@ Tick all of these before you say your component is finished:
 - [ ] Has anyone hardcoded a colour instead of importing it from `theme.ts`? (Search for `#` in screen files.)
 - [ ] Do orphaned Storage files exist — credentials or lesson media whose document was deleted but whose file wasn't?
 - [ ] Has anyone accidentally committed `.env`?
-- [ ] Is every "hidden by not showing the button" rule *also* enforced in security rules? (e.g. only the assigned teacher may mark a booking completed)
+- [ ] Do service functions reject invalid ownership/status actions, such as another user completing a booking?
 - [ ] Do you have a working APK **and** an Expo Go fallback for demo day? Campus Wi-Fi fails at the worst moment.
 - [ ] Has someone rehearsed the full demo journey (§15) end-to-end, out loud, twice?
 
@@ -2173,9 +2000,7 @@ npx tsc --noEmit                   # type-check the whole project
 # Firebase
 npm install -g firebase-tools
 firebase login
-firebase init                      # firestore, storage, functions
-firebase deploy --only firestore:rules
-firebase deploy --only storage
+firebase init                      # indexes and functions, only when needed
 firebase deploy --only firestore:indexes
 firebase deploy --only functions
 firebase functions:secrets:set GEMINI_API_KEY
@@ -2191,6 +2016,6 @@ node scripts/seed.js
 
 ## 21. One-Page Summary (for your report's overview section)
 
-> SkillBridge is a peer-to-peer skill-exchange app for campus communities, built with React Native (Expo) and Firebase. Learners discover peers by skill, inspect the certificates and credentials a teacher has attached to each skill they offer, study 5–15 minute micro-lessons with AI-generated quizzes and flashcards, book one-to-one or group sessions, chat in real time, and rate each other afterwards — building a reputation system that makes free peer teaching trustworthy. It addresses **SDG 4 (Quality Education)** by making learning free and peer-driven, and **SDG 8 (Decent Work)** by letting people trade skills instead of money.
+> SkillBridge is a peer-to-peer skill-exchange app for campus communities, built with React Native (Expo) and Firebase. Learners discover peers by skill, inspect teacher credentials, study teacher-created YouTube/PDF lessons with progress tracking, book one-to-one or group sessions, chat in real time, share community posts, and leave feedback afterwards — building a reputation system that makes free peer teaching trustworthy. It addresses **SDG 4 (Quality Education)** by making learning free and peer-driven, and **SDG 8 (Decent Work)** by rewarding peer teaching with reputation and Skill Credits.
 >
-> The architecture is deliberately serverless: Firestore security rules replace an Express validation layer, Firestore transactions replace SQL constraints for seat allocation and rating aggregation, and a single Cloud Function proxies the Gemini API so no key ships in the client. Four members each own one vertical slice — Discovery, Micro-Learning, Sessions, and Community — connected through eighteen documented integration points, one shared skill taxonomy (plus a career-goal catalog layered on top for learners), and a single design system built on a 60:30:10 colour ratio with WCAG AA-verified contrast throughout.
+> The architecture is deliberately serverless: Firebase provides authentication, document storage and file storage; client service functions centralize validation; and Firestore transactions protect seat allocation, ratings and counters. Four members each own one vertical slice — Discovery, Micro-Learning, Sessions, and Community — connected through documented integration points, one shared skill taxonomy (plus a career-goal catalog layered on top for learners), and a single design system built on a 60:30:10 colour ratio with WCAG AA-verified contrast throughout. Gemini remains an optional later enhancement after the campus demo flow is stable.

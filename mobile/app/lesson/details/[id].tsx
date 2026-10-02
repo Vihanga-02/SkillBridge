@@ -1,3 +1,5 @@
+import { lessonCompletion } from '@/utils/lessonProgress';
+import { EnrollmentCount } from '@/components/lesson/EnrollmentCount';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
@@ -39,7 +41,7 @@ export default function LessonDetailsScreen() {
 
       setLesson(row);
       setEnrollment(
-        row.teacherId === profile.uid || profile.role === 'teacher'
+        profile.role === 'teacher'
           ? null
           : await getEnrollment(profile.uid, row.id)
       );
@@ -63,6 +65,7 @@ export default function LessonDetailsScreen() {
     try {
       await enrollInLesson(profile, lesson);
       setEnrollment(await getEnrollment(profile.uid, lesson.id));
+      setLesson(await getLesson(lesson.id));
     } catch (enrollError) {
       setError(errorMessage(enrollError));
     } finally {
@@ -99,6 +102,7 @@ export default function LessonDetailsScreen() {
 
             <Card>
               <View style={styles.infoCard}>
+                <EnrollmentCount count={lesson.enrollmentCount} />
                 <InfoRow icon="flag-outline" label="Career Goal" value={lesson.careerGoalName || 'Not specified'} />
                 <Pressable
                   onPress={() => router.push({ pathname: '/user/[id]', params: { id: lesson.teacherId } })}
@@ -138,6 +142,9 @@ export default function LessonDetailsScreen() {
                   {pdfCount > 0 ? (
                     <MaterialRow icon="document-text-outline" count={pdfCount} label="PDF document" />
                   ) : null}
+                  {lesson.quiz?.length > 0 ? (
+                    <MaterialRow icon="help-circle-outline" count={lesson.quiz.length} label="MCQ question" />
+                  ) : null}
                   <Text style={styles.protectedHint}>
                     Enroll to open videos, PDFs, quizzes, flashcards, and progress tracking.
                   </Text>
@@ -147,7 +154,11 @@ export default function LessonDetailsScreen() {
 
             {isOwnLesson ? (
               <View style={styles.actions}>
-                <Notice tone="info" message="Your lesson" />
+                <Notice tone="info" message={enrollment ? 'Your lesson ? Enrolled as a learner' : 'Your lesson'} />
+                {canLearn && !enrollment ? (
+                  <Button label="Enroll as learner" icon="add-outline" loading={enrolling}
+                    disabled={lesson.deleting} onPress={() => void enroll()} />
+                ) : null}
                 <Button
                   label="View Lesson"
                   icon="eye-outline"
@@ -169,12 +180,34 @@ export default function LessonDetailsScreen() {
               <View style={styles.actions}>
                 <Notice
                   tone="success"
-                  message={enrollment.completed ? '✓ Completed' : '✓ Enrolled'}
+                  message={lessonCompletion(lesson, enrollment).completed ? '✓ Completed' : '✓ Enrolled'}
                 />
                 <Button
-                  label={enrollment.completed ? 'Review Lesson' : 'Continue Learning'}
-                  icon="play-outline"
-                  onPress={() => router.push({ pathname: '/lesson/[id]', params: { id: lesson.id } })}
+                  label={
+                    enrollment.completed
+                      ? enrollment.reviewedByLearner
+                        ? 'Open Lesson'
+                        : 'Review Lesson'
+                      : 'Continue Learning'
+                  }
+                  icon={
+                    enrollment.completed
+                      ? enrollment.reviewedByLearner
+                        ? 'eye-outline'
+                        : 'star-outline'
+                      : 'play-outline'
+                  }
+                  variant={enrollment.completed ? 'secondary' : 'primary'}
+                  onPress={() =>
+                    router.push({
+                      // Keep the lesson accessible after the one-time review is submitted.
+                      pathname:
+                        enrollment.completed && !enrollment.reviewedByLearner
+                          ? '/review/lesson/[id]'
+                          : '/lesson/[id]',
+                      params: { id: lesson.id },
+                    })
+                  }
                 />
               </View>
             ) : canLearn ? (
@@ -182,6 +215,7 @@ export default function LessonDetailsScreen() {
                 label="Enroll"
                 icon="add-outline"
                 loading={enrolling}
+                disabled={lesson.deleting}
                 onPress={() => void enroll()}
               />
             ) : (

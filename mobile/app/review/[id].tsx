@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { Chip } from '@/components/ui/Chip';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { Input } from '@/components/ui/Input';
@@ -17,7 +18,7 @@ import { TEXT_LIMITS } from '@/constants/config';
 import { colors, spacing, type } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { getBooking } from '@/services/bookingService';
-import { submitLearnerReview } from '@/services/reviewService';
+import { REVIEW_TAGS, submitLearnerReview, type ReviewTag } from '@/services/reviewService';
 import type { Booking } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
 
@@ -30,6 +31,7 @@ export default function LeaveReviewScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState('');
+  const [selectedTags, setSelectedTags] = useState<ReviewTag[]>([]);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -62,13 +64,20 @@ export default function LeaveReviewScreen() {
     setSubmitError(null);
     setSubmitting(true);
     try {
-      await submitLearnerReview(booking.id, profile, rating, comment);
+      await submitLearnerReview(booking.id, profile, rating, comment, selectedTags);
       setSubmitted(true);
     } catch (error) {
       setSubmitError(errorMessage(error));
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function toggleTag(tag: ReviewTag) {
+    setSelectedTags((current) =>
+      current.includes(tag) ? current.filter((value) => value !== tag) : [...current, tag]
+    );
+    setSubmitError(null);
   }
 
   if (!profile || loading) {
@@ -156,6 +165,24 @@ export default function LeaveReviewScreen() {
           </View>
         </Card>
 
+        <Card>
+          <View style={styles.formSection}>
+            <Text style={styles.label}>What stood out? (optional)</Text>
+            <View style={styles.tags}>
+              {REVIEW_TAGS.map((tag) => (
+                <Chip
+                  key={tag.value}
+                  label={tag.label}
+                  selected={selectedTags.includes(tag.value)}
+                  disabled={submitting}
+                  onPress={() => toggleTag(tag.value)}
+                />
+              ))}
+            </View>
+            <Text style={styles.helper}>Select all feedback tags that apply.</Text>
+          </View>
+        </Card>
+
         <Input
           label="Share feedback (optional)"
           value={comment}
@@ -209,6 +236,11 @@ const styles = StyleSheet.create({
     color: colors.inkMuted,
   },
   formSection: {
+    gap: spacing.sm,
+  },
+  tags: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: spacing.sm,
   },
   label: {

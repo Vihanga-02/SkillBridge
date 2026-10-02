@@ -18,7 +18,11 @@ import { SkillChip } from '@/components/ui/SkillChip';
 import { skillLabel } from '@/constants/skills';
 import { colors, sizes, spacing, type } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
-import { getBookingForSession, requestBooking } from '@/services/bookingService';
+import {
+  BookingScheduleConflictError,
+  getBookingForSession,
+  requestBooking,
+} from '@/services/bookingService';
 import { getSession, listUpcomingSessions } from '@/services/sessionService';
 import { getUser } from '@/services/userService';
 import type { Booking, Session, User } from '@/types';
@@ -122,7 +126,11 @@ export default function SessionDetailScreen() {
         { text: 'My bookings', onPress: () => router.replace('/(tabs)/sessions') },
       ]);
     } catch (requestError) {
-      setError(errorMessage(requestError));
+      const message = errorMessage(requestError);
+      setError(message);
+      if (requestError instanceof BookingScheduleConflictError) {
+        Alert.alert('Booking conflict', message);
+      }
     } finally {
       setRequesting(false);
     }

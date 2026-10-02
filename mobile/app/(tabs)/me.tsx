@@ -15,10 +15,12 @@ import { SkillPortfolio } from '@/components/user/SkillPortfolio';
 import { colors, radius, sizes, spacing, type } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { logout } from '@/services/authService';
-import { subscribeToLessonsByTeacher } from '@/services/lessonService';
+import { subscribeToEnrollmentsByUser, subscribeToLessonsByTeacher } from '@/services/lessonService';
 import type { UserRole } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
 import { formatDate } from '@/utils/date';
+import { getProfileCompleteness } from '@/utils/profileCompleteness';
+import { nonNegativeCount } from '@/utils/counts';
 
 const ROLE_LABEL: Record<UserRole, string> = {
   learner: 'Learning',
@@ -30,13 +32,15 @@ export default function MeScreen() {
   const { profile, firebaseUser } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [createdLessonCount, setCreatedLessonCount] = useState(0);
+  const [enrolledLessonCount, setEnrolledLessonCount] = useState(0);
 
   const canTeach = profile?.role === 'teacher' || profile?.role === 'both';
+  const canLearn = profile?.role === 'learner' || profile?.role === 'both';
   const profileUid = profile?.uid;
 
   useEffect(() => {
+    setCreatedLessonCount(0);
     if (!profileUid || !canTeach) {
-      setCreatedLessonCount(0);
       return;
     }
 
@@ -47,7 +51,26 @@ export default function MeScreen() {
     );
   }, [canTeach, profileUid]);
 
+  useEffect(() => {
+    setEnrolledLessonCount(0);
+    if (!profileUid || !canLearn) return;
+    return subscribeToEnrollmentsByUser(profileUid,
+      rows => setEnrolledLessonCount(new Set(rows.map(row => row.lessonId)).size),
+      enrollmentError => setError(errorMessage(enrollmentError)));
+  }, [canLearn, profileUid]);
+
   if (!profile) return <LoadingState fullScreen label="Loading your profile…" />;
+
+  const profileCompleteness = getProfileCompleteness(profile);
+
+  function openCompletenessAction() {
+    if (profileCompleteness.nextItem?.destination === 'credentials') {
+      router.push('/profile/credentials');
+      return;
+    }
+
+    router.push('/profile/edit');
+  }
 
   function confirmLogout() {
     Alert.alert('Log out?', 'You can log back in with the same email and password.', [
@@ -98,7 +121,7 @@ export default function MeScreen() {
 
               <View style={styles.metaRow}>
                 <Chip label={ROLE_LABEL[profile.role]} icon="person-outline" />
-                <Chip label={`${profile.credits} credits`} icon="sparkles-outline" />
+                <Chip label={`${nonNegativeCount(profile.credits)} credits`} icon="sparkles-outline" />
               </View>
 
               {profile.location ? (
@@ -115,14 +138,78 @@ export default function MeScreen() {
 
         <View style={styles.padded}>
           <Card>
-            <View style={styles.statsRow}>
-              <Stat label="Taught" value={profile.stats.sessionsTaught} />
-              <Stat label="Attended" value={profile.stats.sessionsAttended} />
-              <Stat
-                label="Lessons"
-                value={canTeach ? createdLessonCount : profile.stats.lessonsCompleted}
-              />
+            <View style={styles.completeness}>
+              <View style={styles.completenessHeader}>
+                <View style={styles.completenessHeading}>
+                  <Text style={styles.completenessTitle}>Profile completeness</Text>
+                  <Text style={styles.muted}>
+                    {profileCompleteness.completedCount} of {profileCompleteness.items.length} complete
+                  </Text>
+                </View>
+                <Text style={styles.completenessPercent}>{profileCompleteness.percentage}%</Text>
+              </View>
+
+              <View
+                style={styles.completenessTrack}
+                accessibilityRole="progressbar"
+                accessibilityLabel="Profile completeness"
+                accessibilityValue={{
+                  min: 0,
+                  max: 100,
+                  now: profileCompleteness.percentage,
+                }}>
+                <View
+                  style={[
+                    styles.completenessFill,
+                    { width: `${profileCompleteness.percentage}%` },
+                  ]}
+                />
+              </View>
+
+              <View style={styles.checklist}>
+                {profileCompleteness.items.map((item) => (
+                  <View key={item.id} style={styles.checklistRow}>
+                    <Ionicons
+                      name={item.completed ? 'checkmark-circle' : 'ellipse-outline'}
+                      size={sizes.iconMd}
+                      color={item.completed ? colors.success : colors.inkFaint}
+                    />
+                    <Text style={[styles.checklistLabel, item.completed && styles.checklistDone]}>
+                      {item.label}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+
+              {profileCompleteness.nextItem ? (
+                <Button
+                  label={profileCompleteness.nextItem.actionLabel}
+                  variant="secondary"
+                  icon="arrow-forward-outline"
+                  onPress={openCompletenessAction}
+                />
+              ) : (
+                <Notice
+                  tone="success"
+                  message="Your profile is complete and ready to build trust with other learners."
+                />
+              )}
             </View>
+          </Card>
+        </View>
+
+        <View style={styles.padded}>
+          <Card>
+            <View style={styles.statsRow}>
+              <Stat label="Taught" value={profile.stats?.sessionsTaught} />
+              <Stat label="Attended" value={profile.stats?.sessionsAttended} />
+              {profile.role !== 'both' ? <Stat label={canTeach ? 'Created Lessons' : 'Enrolled Lessons'}
+                value={canTeach ? createdLessonCount : enrolledLessonCount} /> : null}
+            </View>
+            {profile.role === 'both' ? <View style={[styles.statsRow, { marginTop: spacing.lg }]}>
+              <Stat label="Created Lessons" value={createdLessonCount} />
+              <Stat label="Enrolled Lessons" value={enrolledLessonCount} />
+            </View> : null}
           </Card>
         </View>
 
@@ -154,8 +241,8 @@ export default function MeScreen() {
           ) : null}
           <MenuRow
             icon="book-outline"
-            label="My lessons"
-            hint={canTeach ? 'Created and enrolled lessons' : 'Lessons you enrolled in'}
+            label="My Lessons"
+            hint={profile.role === 'both' ? 'Created and enrolled lessons' : canTeach ? 'Lessons you created' : 'Lessons you enrolled in'}
             onPress={() => router.push('/profile/lessons' as Href)}
           />
           <MenuRow
@@ -229,11 +316,11 @@ function MenuRow({
   );
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+function Stat({ label, value }: { label: string; value: number | undefined }) {
   return (
-    <View style={styles.stat}>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.muted}>{label}</Text>
+    <View style={styles.stat} accessibilityLabel={`${label}: ${nonNegativeCount(value)}`}>
+      <Text style={styles.statValue}>{nonNegativeCount(value)}</Text>
+      <Text style={[styles.muted, { textAlign: 'center' }]}>{label}</Text>
     </View>
   );
 }
@@ -289,6 +376,53 @@ const styles = StyleSheet.create({
   },
   statsRow: {
     flexDirection: 'row',
+  },
+  completeness: {
+    gap: spacing.lg,
+  },
+  completenessHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  completenessHeading: {
+    flex: 1,
+    gap: spacing.xs,
+  },
+  completenessTitle: {
+    ...type.h2,
+    color: colors.ink,
+  },
+  completenessPercent: {
+    ...type.h1,
+    color: colors.accent,
+  },
+  completenessTrack: {
+    height: spacing.sm,
+    overflow: 'hidden',
+    borderRadius: radius.full,
+    backgroundColor: colors.surfaceAlt,
+  },
+  completenessFill: {
+    height: '100%',
+    borderRadius: radius.full,
+    backgroundColor: colors.accent,
+  },
+  checklist: {
+    gap: spacing.sm,
+  },
+  checklistRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  checklistLabel: {
+    ...type.body,
+    color: colors.ink,
+    flex: 1,
+  },
+  checklistDone: {
+    color: colors.inkMuted,
   },
   stat: {
     flex: 1,

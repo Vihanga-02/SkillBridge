@@ -8,9 +8,15 @@
     "scheme": "skillbridge",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/d97d89bf-3575-4a20-bbba-bd2cbfc46234"
+    },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.skillbridge.app",
+      "bundleIdentifier": "com.sliit.skillbridge.app",
       "infoPlist": {
         "NSCameraUsageDescription": "SkillBridge uses your camera during in-app video sessions.",
         "NSMicrophoneUsageDescription": "SkillBridge uses your microphone during in-app video sessions."
@@ -18,7 +24,7 @@
       "bitcode": false
     },
     "android": {
-      "package": "com.skillbridge.app",
+      "package": "com.sliit.skillbridge.app",
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
@@ -73,9 +79,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "f4be90aa-8daa-40fe-9e4c-356bd28679fa"
+        "projectId": "d97d89bf-3575-4a20-bbba-bd2cbfc46234"
       }
     },
-    "owner": "amaya_hiruni"
+    "owner": "skillbridge-team"
   }
 }

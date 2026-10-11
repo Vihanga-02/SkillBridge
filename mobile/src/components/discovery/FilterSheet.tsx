@@ -3,6 +3,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/ui/Button';
 import { Chip } from '@/components/ui/Chip';
+import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
 import { CAREER_GOALS, skillsInGoal, type CareerGoalTag } from '@/constants/careerGoals';
 import {
   CATEGORIES,
@@ -46,36 +47,6 @@ type Props = {
   level: Level | null;
   onLevel: (value: Level | null) => void;
 };
-
-function Segmented<T extends string>({
-  options,
-  value,
-  onChange,
-}: {
-  options: { value: T; label: string }[];
-  value: T;
-  onChange: (value: T) => void;
-}) {
-  return (
-    <View style={styles.segmented}>
-      {options.map((option) => {
-        const selected = value === option.value;
-        return (
-          <Pressable
-            key={option.value}
-            onPress={() => onChange(option.value)}
-            accessibilityRole="button"
-            accessibilityState={{ selected }}
-            style={[styles.segment, selected && styles.segmentSelected]}>
-            <Text style={[styles.segmentText, selected && styles.segmentTextSelected]}>
-              {option.label}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -135,11 +106,11 @@ export function FilterSheet({
           contentContainerStyle={styles.body}
           showsVerticalScrollIndicator={false}>
           <Section title="Show">
-            <Segmented options={ROLE_FILTERS} value={roleFilter} onChange={onRoleFilter} />
+            <SegmentedTabs options={ROLE_FILTERS} value={roleFilter} onChange={onRoleFilter} />
           </Section>
 
           <Section title="Browse by">
-            <Segmented options={BROWSE_MODES} value={browseMode} onChange={onBrowseMode} />
+            <SegmentedTabs options={BROWSE_MODES} value={browseMode} onChange={onBrowseMode} />
             <View style={styles.chips}>
               {browseMode === 'category' ? (
                 <>
@@ -262,30 +233,5 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
-  },
-  segmented: {
-    flexDirection: 'row',
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: radius.sm,
-    padding: 2,
-  },
-  segment: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: spacing.xxl + spacing.xs,
-    borderRadius: radius.sm - 2,
-  },
-  segmentSelected: {
-    backgroundColor: colors.surface,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: colors.border,
-  },
-  segmentText: {
-    ...type.label,
-    color: colors.inkMuted,
-  },
-  segmentTextSelected: {
-    color: colors.ink,
   },
 });

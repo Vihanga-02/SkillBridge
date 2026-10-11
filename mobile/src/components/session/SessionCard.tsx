@@ -1,10 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
+import { format } from 'date-fns';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Avatar } from '@/components/ui/Avatar';
 import { SkillChip } from '@/components/ui/SkillChip';
+import { CATEGORY_STYLE } from '@/constants/categoryStyle';
 import { skillLabel } from '@/constants/skills';
 import { colors, radius, sizes, spacing, type } from '@/constants/theme';
 import type { Session } from '@/types';
@@ -41,9 +43,7 @@ export function SessionCard({
   return (
     <Card onPress={onActionPress ? onPress : undefined} accessibilityLabel={session.title}>
       <View style={styles.heading}>
-        <View style={styles.skillIcon}>
-          <Ionicons name="school-outline" size={sizes.iconMd} color={colors.accent} />
-        </View>
+        <DateTile session={session} />
         <View style={styles.titleBlock}>
           <Text style={styles.title} numberOfLines={2}>
             {session.title}
@@ -118,6 +118,29 @@ export function SessionCard({
   );
 }
 
+/** Day and month at a glance, tinted by the session's category. */
+function DateTile({ session }: { session: Session }) {
+  const start = session.startAt?.toDate?.();
+  const style = session.category ? CATEGORY_STYLE[session.category] : undefined;
+  const color = style?.color ?? colors.accent;
+
+  return (
+    <View
+      style={[styles.dateTile, { backgroundColor: style?.surface ?? colors.accentSurface }]}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants">
+      {start ? (
+        <>
+          <Text style={[styles.dateDay, { color }]}>{format(start, 'd')}</Text>
+          <Text style={[styles.dateMonth, { color }]}>{format(start, 'MMM').toUpperCase()}</Text>
+        </>
+      ) : (
+        <Ionicons name="school-outline" size={sizes.iconMd} color={color} />
+      )}
+    </View>
+  );
+}
+
 function Meta({ icon, text }: { icon: keyof typeof Ionicons.glyphMap; text: string }) {
   return (
     <View style={styles.metaItem}>
@@ -131,14 +154,15 @@ function Meta({ icon, text }: { icon: keyof typeof Ionicons.glyphMap; text: stri
 
 const styles = StyleSheet.create({
   heading: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md },
-  skillIcon: {
-    width: sizes.touchMin,
-    height: sizes.touchMin,
-    borderRadius: radius.sm,
-    backgroundColor: colors.accentSurface,
+  dateTile: {
+    width: sizes.control + spacing.xs,
+    height: sizes.control + spacing.xs,
+    borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  dateDay: { ...type.h1, lineHeight: type.h1.fontSize + 2 },
+  dateMonth: { ...type.caption, fontWeight: '700', letterSpacing: 0.5 },
   titleBlock: { flex: 1, gap: spacing.sm, alignItems: 'flex-start' },
   title: { ...type.h2, color: colors.ink },
   description: { ...type.body, color: colors.inkMuted, marginTop: spacing.md },

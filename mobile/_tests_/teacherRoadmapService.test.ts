@@ -19,6 +19,9 @@ let versions: Map<string, number>;
 let writes: string[];
 const user = { uid: 'teacher', name: 'Teacher', role: 'teacher' } as User;
 const input = { title: 'JS Path', careerGoalId: 'software-engineer' as const, skill: ' JavaScript ', description: '', lessonIds: ['a', 'b'] };
+/** A learner who selected the roadmap's career goal — the only roadmaps they follow. */
+const learner = (role: 'learner' | 'both' = 'learner', goal: string = input.careerGoalId) =>
+  ({ ...user, role, careerGoals: [{ goal, label: goal, skillTags: [] }] }) as User;
 function put(path: string, value: Data) { records.set(path, value); versions.set(path, (versions.get(path) ?? 0) + 1); }
 const snapshot = (ref: Ref) => {
   const value = records.get(ref.path);
@@ -99,7 +102,7 @@ it.each(['learner', 'both'] as const)('%s discovers only relevant roadmaps, incl
   await saveTeacherRoadmap(user, input);
   put('teacherRoadmaps/irrelevant', { ...records.get('teacherRoadmaps/new'), lessonIds: ['z'] });
   (listEnrollmentsByUser as jest.Mock).mockResolvedValue([{ lessonId: 'a', completed: true, progress: 100 }]);
-  const result = await loadRoadmaps({ ...user, role }, 'learn');
+  const result = await loadRoadmaps(learner(role), 'learn');
   expect(result.roadmaps.map(row => row.id)).toEqual(['new']);
   expect(listEnrollmentsByUser).toHaveBeenCalledTimes(1);
   expect(listLessonsByIds).toHaveBeenCalledTimes(1);
@@ -109,13 +112,42 @@ it.each(['learner', 'both'] as const)('%s discovers only relevant roadmaps, incl
 it('batches membership queries in groups of 30 and deduplicates shared roadmaps and lesson reads', async () => {
   await saveTeacherRoadmap(user, input);
   (listEnrollmentsByUser as jest.Mock).mockResolvedValue(Array.from({ length: 61 }, (_, i) => ({ lessonId: i === 0 ? 'a' : i === 31 ? 'b' : `id${i}` })));
-  const result = await loadRoadmaps({ ...user, role: 'learner' }, 'learn');
+  const result = await loadRoadmaps(learner(), 'learn');
   expect(getDocs).toHaveBeenCalledTimes(3);
   expect(result.roadmaps).toHaveLength(1);
   expect(listLessonsByIds).toHaveBeenCalledWith(['a', 'b']);
 });
 it('does not scan all roadmaps when the learner has no enrollments', async () => {
-  expect((await loadRoadmaps({ ...user, role: 'learner' }, 'learn')).roadmaps).toEqual([]);
+  expect((await loadRoadmaps(learner(), 'learn')).roadmaps).toEqual([]);
+  expect(getDocs).not.toHaveBeenCalled();
+});
+it('hides a roadmap the learner is enrolled in when its career goal is not one they selected', async () => {
+  await saveTeacherRoadmap(user, input);
+  (listEnrollmentsByUser as jest.Mock).mockResolvedValue([{ lessonId: 'a', completed: false, progress: 40 }]);
+  const result = await loadRoadmaps(learner('learner', 'cloud-engineer'), 'learn');
+  expect(result.roadmaps).toEqual([]);
+  // Lessons of a hidden roadmap are never fetched.
+  expect(listLessonsByIds).toHaveBeenCalledWith([]);
+});
+it('shows roadmaps from every selected career goal', async () => {
+  await saveTeacherRoadmap(user, input);
+  (listEnrollmentsByUser as jest.Mock).mockResolvedValue([{ lessonId: 'a', completed: false, progress: 40 }]);
+  const both = { ...learner(), careerGoals: [
+    { goal: 'cloud-engineer', label: 'Cloud Engineer', skillTags: [] },
+    { goal: input.careerGoalId, label: 'Software Engineer', skillTags: [] },
+  ] } as User;
+  expect((await loadRoadmaps(both, 'learn')).roadmaps.map(row => row.id)).toEqual(['new']);
+});
+it.each([
+  ['no career goals', []],
+  ['an older profile without the field', undefined],
+])('a learner with %s gets no roadmaps and makes no lookups', async (_label, careerGoals) => {
+  await saveTeacherRoadmap(user, input);
+  jest.clearAllMocks();
+  (listEnrollmentsByUser as jest.Mock).mockResolvedValue([{ lessonId: 'a', completed: true, progress: 100 }]);
+  const result = await loadRoadmaps({ ...user, role: 'learner', careerGoals } as User, 'learn');
+  expect(result.roadmaps).toEqual([]);
+  expect(listEnrollmentsByUser).not.toHaveBeenCalled();
   expect(getDocs).not.toHaveBeenCalled();
 });
 it('guards direct links and keeps teaching views separate from self-enrolled learner views', async () => {

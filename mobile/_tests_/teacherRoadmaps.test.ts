@@ -1,5 +1,5 @@
-import { learnerRoadmapHierarchy, roadmapProgress, skillKeyFor, validateRoadmap, isEligibleRoadmapLesson, moveRoadmapLesson } from '@/utils/teacherRoadmaps';
-import type { Lesson, LessonEnrollment, TeacherRoadmap } from '@/types';
+import { learnerRoadmapHierarchy, roadmapProgress, skillKeyFor, validateRoadmap, isEligibleRoadmapLesson, isRoadmapInLearnerGoals, moveRoadmapLesson } from '@/utils/teacherRoadmaps';
+import type { CareerGoal, Lesson, LessonEnrollment, TeacherRoadmap } from '@/types';
 
 const lesson = (id: string, patch = {}) => ({ id, teacherId: 'teacher', careerGoalId: 'software-engineer', published: true, ...patch }) as Lesson;
 const roadmap = (ids: string[]) => ({ lessonIds: ids, teacherId: 'teacher', careerGoalId: 'software-engineer' }) as TeacherRoadmap;
@@ -18,6 +18,23 @@ it.each([
   [{ description: 'a'.repeat(1001) }, '1000'],
 ])('validates required roadmap fields %#', (patch, message) => {
   expect(() => validateRoadmap({ ...input, ...patch })).toThrow(message as string);
+});
+describe('isRoadmapInLearnerGoals', () => {
+  const goal = (tag: CareerGoal['goal']) => ({ goal: tag, label: tag, skillTags: [] }) as CareerGoal;
+  const path = roadmap(['a']);
+
+  it('includes a roadmap for one of the selected career goals', () => {
+    expect(isRoadmapInLearnerGoals(path, { careerGoals: [goal('cloud-engineer'), goal('software-engineer')] })).toBe(true);
+  });
+  it('excludes a roadmap for a career goal the learner did not select', () => {
+    expect(isRoadmapInLearnerGoals(path, { careerGoals: [goal('cloud-engineer')] })).toBe(false);
+  });
+  it('excludes every roadmap when the learner has no career goals', () => {
+    expect(isRoadmapInLearnerGoals(path, { careerGoals: [] })).toBe(false);
+  });
+  it('treats an older profile without career goals as having none', () => {
+    expect(isRoadmapInLearnerGoals(path, { careerGoals: undefined as unknown as CareerGoal[] })).toBe(false);
+  });
 });
 it('filters teacher ownership, matching career goal and lesson availability', () => {
   const all = [lesson('a'), lesson('b', { teacherId: 'other' }), lesson('c', { careerGoalId: 'cloud-engineer' }), lesson('d', { deleting: true }), lesson('e', { published: false })];

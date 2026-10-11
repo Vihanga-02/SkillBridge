@@ -8,6 +8,8 @@ type Props = {
   selected?: boolean;
   onPress?: () => void;
   icon?: keyof typeof Ionicons.glyphMap;
+  /** Icon colour while unselected; selected chips always use `accent`. */
+  iconColor?: string;
   disabled?: boolean;
   /** Compact pills for dense filter rows on small screens. */
   size?: 'md' | 'sm';
@@ -21,18 +23,20 @@ export function Chip({
   selected = false,
   onPress,
   icon,
+  iconColor,
   disabled = false,
   size = 'md',
   showCheck,
 }: Props) {
   const tint = selected ? colors.accent : colors.inkMuted;
+  const iconTint = selected ? colors.accent : (iconColor ?? tint);
   const compact = size === 'sm';
   const withCheck = showCheck ?? !compact;
 
   const body = (
     <View style={styles.content}>
       {icon ? (
-        <Ionicons name={icon} size={compact ? 12 : sizes.iconSm} color={tint} />
+        <Ionicons name={icon} size={compact ? 12 : sizes.iconSm} color={iconTint} />
       ) : null}
       <Text style={[compact ? styles.labelSm : styles.label, { color: tint }]} numberOfLines={1}>
         {label}

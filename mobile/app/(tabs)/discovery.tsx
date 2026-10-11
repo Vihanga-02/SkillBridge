@@ -1,51 +1,62 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useIsFocused } from '@react-navigation/native';
 import { router } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import { useCallback, useMemo, useState } from 'react';
-import { FlatList, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { FlatList, ScrollView, StyleSheet, Text, View } from 'react-native';
+import Animated, { FadeIn, FadeInDown, ReduceMotion } from 'react-native-reanimated';
 
+import { DiscoverHero } from '@/components/discovery/DiscoverHero';
+import {
+  FilterSheet,
+  ROLE_FILTERS,
+  type BrowseMode,
+  type RoleFilter,
+} from '@/components/discovery/FilterSheet';
+import { PeopleCarousel } from '@/components/discovery/PeopleCarousel';
 import { Chip } from '@/components/ui/Chip';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { LoadingState } from '@/components/ui/LoadingState';
-import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { SkeletonList } from '@/components/ui/Skeleton';
 import { UserCard } from '@/components/user/UserCard';
-import { CAREER_GOALS, skillsInGoal, type CareerGoalTag } from '@/constants/careerGoals';
+import { goalLabel, type CareerGoalTag } from '@/constants/careerGoals';
+import { PAGE_SIZE } from '@/constants/config';
 import {
   CATEGORIES,
-  LEVELS,
   LEVEL_LABELS,
-  skillsInCategory,
+  skillLabel,
   type Category,
   type Level,
   type SkillTag,
 } from '@/constants/skills';
-import { colors, radius, sizes, spacing, type } from '@/constants/theme';
+import { brand, colors, spacing, type } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useDebounce } from '@/hooks/useDebounce';
 import { usePaginatedQuery } from '@/hooks/usePaginatedQuery';
 import type { PageCursor } from '@/services/pagination';
 import { searchUsers } from '@/services/userService';
 import type { User } from '@/types';
+import { rankInBatches, type PeerMatch } from '@/utils/peerMatch';
 
-type RoleFilter = 'all' | 'teachers' | 'learners';
+type IconName = keyof typeof Ionicons.glyphMap;
 
-const ROLE_FILTERS: { value: RoleFilter; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'teachers', label: 'Teachers' },
-  { value: 'learners', label: 'Learners' },
-];
+const CATEGORY_ICON: Record<Category, { name: IconName; color: string }> = {
+  Programming: { name: 'code-slash', color: brand.blue },
+  Design: { name: 'color-palette', color: brand.green },
+  Business: { name: 'briefcase', color: colors.accent },
+  Academic: { name: 'school', color: brand.navy },
+};
 
-type BrowseMode = 'category' | 'goal';
+/** Cards past this index appear without a stagger, so long lists never lag. */
+const STAGGERED_CARDS = 8;
+const TOP_RATED_COUNT = 5;
 
-const BROWSE_MODES: { value: BrowseMode; label: string }[] = [
-  { value: 'category', label: 'Category' },
-  { value: 'goal', label: 'Career goal' },
-];
+type Row = { user: User; match?: PeerMatch };
 
 export default function DiscoveryScreen() {
   const { profile } = useAuth();
+  const isFocused = useIsFocused();
 
   const [text, setText] = useState('');
   const [browseMode, setBrowseMode] = useState<BrowseMode>('category');
@@ -54,6 +65,7 @@ export default function DiscoveryScreen() {
   const [careerGoal, setCareerGoal] = useState<CareerGoalTag | null>(null);
   const [level, setLevel] = useState<Level | null>(null);
   const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const searchTerm = useDebounce(text.trim(), 350);
   const isNameSearch = searchTerm.length > 0;
@@ -74,26 +86,48 @@ export default function DiscoveryScreen() {
     usePaginatedQuery<User>(fetchPage);
 
   /**
+   * Learners (and "both") see the peers who teach what they want first. A name
+   * search keeps its alphabetical order, and teachers keep the default order.
+   */
+  const rankFor =
+    profile && profile.role !== 'teacher' && !isNameSearch && profile.skillTagsWanted.length > 0
+      ? profile
+      : null;
+
+  /**
    * `level` lives inside `skillsOffered`, an array of objects, which Firestore
    * cannot query into — so it is applied here. Role filter is applied here too
    * so it composes with skill/category queries without needing composite indexes.
    * Self is removed here as well, because an inequality on `uid` would conflict
-   * with other query fields.
+   * with other query fields. Ranking runs first, on whole pages, so the page
+   * boundaries it relies on are still intact.
    */
-  const results = useMemo(
+  const results = useMemo<Row[]>(() => {
+    const rows: Row[] = rankFor
+      ? rankInBatches(items, rankFor, PAGE_SIZE.discovery)
+      : items.map((user) => ({ user }));
+
+    return rows.filter(({ user }) => {
+      if (user.uid === profile?.uid) return false;
+      if (roleFilter === 'teachers' && user.role === 'learner') return false;
+      if (roleFilter === 'learners' && user.role === 'teacher') return false;
+      if (!level) return true;
+      return user.skillsOffered.some((skill) => skill.level === level);
+    });
+  }, [items, rankFor, level, roleFilter, profile?.uid]);
+
+  const topRated = useMemo(
     () =>
-      items.filter((user) => {
-        if (user.uid === profile?.uid) return false;
-        if (roleFilter === 'teachers' && user.role === 'learner') return false;
-        if (roleFilter === 'learners' && user.role === 'teacher') return false;
-        if (!level) return true;
-        return user.skillsOffered.some((skill) => skill.level === level);
-      }),
-    [items, level, roleFilter, profile?.uid]
+      items
+        .filter((user) => user.uid !== profile?.uid && user.ratingCount > 0)
+        .sort((a, b) => b.ratingAvg - a.ratingAvg || b.ratingCount - a.ratingCount)
+        .slice(0, TOP_RATED_COUNT),
+    [items, profile?.uid]
   );
 
-  const hasFilters =
-    isNameSearch || !!category || !!skillTag || !!careerGoal || !!level || roleFilter !== 'all';
+  const filterCount =
+    (category || careerGoal ? 1 : 0) + (skillTag ? 1 : 0) + (level ? 1 : 0) + (roleFilter !== 'all' ? 1 : 0);
+  const hasFilters = isNameSearch || filterCount > 0;
 
   function clearFilters() {
     setText('');
@@ -122,179 +156,102 @@ export default function DiscoveryScreen() {
     setSkillTag(null);
   }
 
-  const categorySkills = category ? skillsInCategory(category) : [];
-  const goalSkills = careerGoal ? skillsInGoal(careerGoal) : [];
+  /** The on-screen category row always browses by category. */
+  function quickCategory(next: Category | null) {
+    if (browseMode !== 'category') switchBrowseMode('category');
+    selectCategory(next);
+  }
+
+  const roleLabel = ROLE_FILTERS.find((option) => option.value === roleFilter)?.label;
+
+  const activeFilters: { key: string; label: string; onRemove: () => void }[] = [
+    ...(roleFilter !== 'all' && roleLabel
+      ? [{ key: 'role', label: roleLabel, onRemove: () => setRoleFilter('all') }]
+      : []),
+    ...(careerGoal
+      ? [{ key: 'goal', label: goalLabel(careerGoal), onRemove: () => selectCareerGoal(null) }]
+      : []),
+    ...(skillTag
+      ? [{ key: 'skill', label: skillLabel(skillTag), onRemove: () => setSkillTag(null) }]
+      : []),
+    ...(level ? [{ key: 'level', label: LEVEL_LABELS[level], onRemove: () => setLevel(null) }] : []),
+  ];
+
+  const showHighlights = !hasFilters && topRated.length > 0;
+
+  const listHeader = (
+    <View style={styles.listHeader}>
+      {showHighlights ? (
+        <PeopleCarousel
+          title="Top rated"
+          icon="trophy-outline"
+          users={topRated}
+          onPressUser={(user) => router.push(`/user/${user.uid}`)}
+        />
+      ) : null}
+      {results.length > 0 ? (
+        <Text style={styles.sectionTitle}>
+          {hasFilters ? 'Results' : rankFor ? 'Best matches for you' : 'Everyone'}
+        </Text>
+      ) : null}
+    </View>
+  );
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScreenHeader title="Discover" />
+    <View style={styles.screen}>
+      {isFocused ? <StatusBar style="light" /> : null}
+
+      <DiscoverHero
+        name={profile?.name ?? ''}
+        avatarUrl={profile?.avatarUrl}
+        search={text}
+        onSearchChange={setText}
+        filterCount={filterCount}
+        onOpenFilters={() => setFiltersOpen(true)}
+        onPressAvatar={() => router.push('/(tabs)/me')}
+      />
 
       <View style={styles.filters}>
-        <View style={styles.searchRow}>
-          <Ionicons name="search" size={sizes.iconSm} color={colors.inkMuted} />
-          <TextInput
-            style={styles.searchInput}
-            value={text}
-            onChangeText={setText}
-            placeholder="Search by name"
-            placeholderTextColor={colors.inkMuted}
-            autoCapitalize="none"
-            autoCorrect={false}
-            returnKeyType="search"
-            accessibilityLabel="Search people by name"
-          />
-          {text.length > 0 ? (
-            <Pressable
-              onPress={() => setText('')}
-              hitSlop={spacing.md}
-              accessibilityRole="button"
-              accessibilityLabel="Clear search">
-              <Ionicons name="close-circle" size={sizes.iconSm} color={colors.inkMuted} />
-            </Pressable>
-          ) : null}
-        </View>
-
-        {/* Role filter stays on screen — never buried in a horizontal scroll. */}
-        <View style={styles.sortRow}>
-          <Text style={styles.sortLabel}>Show</Text>
-          <View style={styles.sortToggle}>
-            {ROLE_FILTERS.map((option) => {
-              const selected = roleFilter === option.value;
-              return (
-                <Pressable
-                  key={option.value}
-                  onPress={() => setRoleFilter(option.value)}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected }}
-                  style={[styles.sortOption, selected && styles.sortOptionSelected]}>
-                  <Text style={[styles.sortOptionText, selected && styles.sortOptionTextSelected]}>
-                    {option.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-
-        {/* Browse by: which set of chips below drives the query — a category's skills or a goal's curriculum. */}
-        <View style={styles.sortRow}>
-          <Text style={styles.sortLabel}>Browse by</Text>
-          <View style={styles.sortToggle}>
-            {BROWSE_MODES.map((option) => {
-              const selected = browseMode === option.value;
-              return (
-                <Pressable
-                  key={option.value}
-                  onPress={() => switchBrowseMode(option.value)}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected }}
-                  style={[styles.sortOption, selected && styles.sortOptionSelected]}>
-                  <Text style={[styles.sortOptionText, selected && styles.sortOptionTextSelected]}>
-                    {option.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-
-        {browseMode === 'category' ? (
-          <>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.filterRow}>
-              <Chip size="sm" label="All" selected={!category} onPress={() => selectCategory(null)} />
-              {CATEGORIES.map((item) => (
-                <Chip
-                  key={item}
-                  size="sm"
-                  label={item}
-                  selected={category === item}
-                  onPress={() => selectCategory(category === item ? null : item)}
-                />
-              ))}
-            </ScrollView>
-
-            {categorySkills.length > 0 ? (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.filterRow}>
-                {categorySkills.map((skill) => (
-                  <Chip
-                    key={skill.tag}
-                    size="sm"
-                    label={skill.label}
-                    selected={skillTag === skill.tag}
-                    onPress={() => setSkillTag(skillTag === skill.tag ? null : skill.tag)}
-                  />
-                ))}
-              </ScrollView>
-            ) : null}
-          </>
-        ) : (
-          <>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.filterRow}>
-              <Chip size="sm" label="All" selected={!careerGoal} onPress={() => selectCareerGoal(null)} />
-              {CAREER_GOALS.map((item) => (
-                <Chip
-                  key={item.tag}
-                  size="sm"
-                  label={item.label}
-                  selected={careerGoal === item.tag}
-                  onPress={() => selectCareerGoal(careerGoal === item.tag ? null : item.tag)}
-                />
-              ))}
-            </ScrollView>
-
-            {goalSkills.length > 0 ? (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.filterRow}>
-                {goalSkills.map((skill) => (
-                  <Chip
-                    key={skill.tag}
-                    size="sm"
-                    label={skill.label}
-                    selected={skillTag === skill.tag}
-                    onPress={() => setSkillTag(skillTag === skill.tag ? null : skill.tag)}
-                  />
-                ))}
-              </ScrollView>
-            ) : null}
-          </>
-        )}
-
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterRow}>
-          <Chip size="sm" label="Any level" selected={!level} onPress={() => setLevel(null)} />
-          {LEVELS.map((item) => (
+          contentContainerStyle={styles.chipRow}>
+          <Chip
+            label="All"
+            icon="apps"
+            selected={!category && !careerGoal}
+            onPress={() => quickCategory(null)}
+          />
+          {CATEGORIES.map((item) => (
             <Chip
               key={item}
-              size="sm"
-              label={LEVEL_LABELS[item]}
-              selected={level === item}
-              onPress={() => setLevel(level === item ? null : item)}
+              label={item}
+              icon={CATEGORY_ICON[item].name}
+              iconColor={CATEGORY_ICON[item].color}
+              selected={browseMode === 'category' && category === item}
+              onPress={() => quickCategory(category === item ? null : item)}
+              showCheck={false}
             />
           ))}
         </ScrollView>
 
-        {hasFilters ? (
-          <Pressable
-            onPress={clearFilters}
-            hitSlop={spacing.sm}
-            accessibilityRole="button"
-            accessibilityLabel="Clear filters"
-            style={styles.clearRow}>
-            <Text style={styles.clearText}>Clear filters</Text>
-          </Pressable>
+        {activeFilters.length > 0 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.chipRow}>
+            {activeFilters.map((filter) => (
+              <Chip
+                key={filter.key}
+                size="sm"
+                icon="close"
+                label={filter.label}
+                selected
+                onPress={filter.onRemove}
+              />
+            ))}
+            <Chip size="sm" label="Clear all" onPress={clearFilters} />
+          </ScrollView>
         ) : null}
 
         {isNameSearch ? (
@@ -312,10 +269,24 @@ export default function DiscoveryScreen() {
       ) : (
         <FlatList
           data={results}
-          keyExtractor={(item) => item.uid}
-          renderItem={({ item }) => (
-            <UserCard user={item} onPress={() => router.push(`/user/${item.uid}`)} />
+          keyExtractor={(row) => row.user.uid}
+          renderItem={({ item, index }) => (
+            <Animated.View
+              entering={
+                index < STAGGERED_CARDS
+                  ? FadeInDown.delay(index * 40)
+                      .duration(320)
+                      .reduceMotion(ReduceMotion.System)
+                  : FadeIn.duration(200).reduceMotion(ReduceMotion.System)
+              }>
+              <UserCard
+                user={item.user}
+                match={item.match}
+                onPress={() => router.push(`/user/${item.user.uid}`)}
+              />
+            </Animated.View>
           )}
+          ListHeaderComponent={listHeader}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
           refreshing={refreshing}
@@ -328,19 +299,21 @@ export default function DiscoveryScreen() {
             hasMore ? (
               <EmptyState
                 icon="search-outline"
-                title="No matching results on this page"
-                message="Everyone loaded so far was filtered out. Load the next page to keep looking."
+                iconColor={brand.blue}
+                title="Nobody on this page matches"
+                message="Everyone loaded so far was filtered out. Load more people to keep looking."
                 actionLabel="Load more"
                 onAction={loadMore}
               />
             ) : (
               <EmptyState
-                icon="search-outline"
-                title={hasFilters ? 'No matching results' : 'No members to show'}
+                icon={hasFilters ? 'search-outline' : 'people-outline'}
+                iconColor={brand.blue}
+                title={hasFilters ? 'No one fits those filters yet' : 'Be one of the first here'}
                 message={
                   hasFilters
-                    ? 'Try a broader category, any level, or clear the filters.'
-                    : 'As people join and list what they can teach, they appear here.'
+                    ? 'Try a broader category or any level — or clear the filters to see everyone.'
+                    : 'As people join and share what they can teach, they will show up here.'
                 }
                 actionLabel={hasFilters ? 'Clear filters' : undefined}
                 onAction={hasFilters ? clearFilters : undefined}
@@ -356,92 +329,54 @@ export default function DiscoveryScreen() {
           }
         />
       )}
-    </SafeAreaView>
+
+      <FilterSheet
+        visible={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        onClearAll={clearFilters}
+        roleFilter={roleFilter}
+        onRoleFilter={setRoleFilter}
+        browseMode={browseMode}
+        onBrowseMode={switchBrowseMode}
+        category={category}
+        onCategory={selectCategory}
+        careerGoal={careerGoal}
+        onCareerGoal={selectCareerGoal}
+        skillTag={skillTag}
+        onSkillTag={setSkillTag}
+        level={level}
+        onLevel={setLevel}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: {
+  screen: {
     flex: 1,
     backgroundColor: colors.bg,
   },
   filters: {
     gap: spacing.sm,
+    paddingTop: spacing.lg,
     paddingBottom: spacing.sm,
   },
-  searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginHorizontal: spacing.lg,
-    paddingHorizontal: spacing.md,
-    minHeight: 40,
-    backgroundColor: colors.surface,
-    borderRadius: radius.sm,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: colors.border,
-  },
-  searchInput: {
-    flex: 1,
-    ...type.label,
-    color: colors.ink,
-    paddingVertical: spacing.sm,
-  },
-  sortRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  chipRow: {
     gap: spacing.sm,
     paddingHorizontal: spacing.lg,
-  },
-  sortLabel: {
-    ...type.caption,
-    color: colors.inkMuted,
-    fontWeight: '500',
-  },
-  sortToggle: {
-    flex: 1,
-    flexDirection: 'row',
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: radius.sm,
-    padding: 2,
-  },
-  sortOption: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 32,
-    borderRadius: radius.sm - 2,
-  },
-  sortOptionSelected: {
-    backgroundColor: colors.surface,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: colors.border,
-  },
-  sortOptionText: {
-    ...type.caption,
-    color: colors.inkMuted,
-    fontWeight: '500',
-  },
-  sortOptionTextSelected: {
-    color: colors.ink,
-  },
-  filterRow: {
-    gap: spacing.xs + 2,
-    paddingHorizontal: spacing.lg,
-  },
-  clearRow: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.xs,
-  },
-  clearText: {
-    ...type.caption,
-    color: colors.accent,
-    fontWeight: '500',
   },
   hint: {
     ...type.caption,
     color: colors.inkMuted,
+    paddingHorizontal: spacing.lg,
+  },
+  listHeader: {
+    gap: spacing.lg,
+    marginHorizontal: -spacing.lg,
+  },
+  sectionTitle: {
+    ...type.h2,
+    color: colors.ink,
     paddingHorizontal: spacing.lg,
   },
   list: {

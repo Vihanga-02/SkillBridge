@@ -1,15 +1,16 @@
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { ChatListRow } from '@/components/community/ChatListRow';
 import { CommunityFeed } from '@/components/community/CommunityFeed';
+import { BrandHeader } from '@/components/ui/BrandHeader';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { LoadingState } from '@/components/ui/LoadingState';
-import { ScreenHeader } from '@/components/ui/ScreenHeader';
-import { colors, radius, sizes, spacing, type } from '@/constants/theme';
+import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
+import { brand, colors, radius, sizes, spacing } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { subscribeToMyChats } from '@/services/chatService';
 import type { Chat } from '@/types';
@@ -49,120 +50,100 @@ export default function CommunityScreen() {
     return <LoadingState fullScreen label="Loading community…" />;
   }
 
-  return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScreenHeader title="Community" subtitle="Share ideas and stay connected." />
+  // Unread conversations, not messages — the badge says how many chats need a look.
+  const unreadChats = chats.filter((chat) => (chat.unreadCount?.[profile.uid] ?? 0) > 0).length;
 
-      <View style={styles.tabBar} accessibilityRole="tablist">
-        <CommunityTabButton
-          label="Feed"
-          selected={activeTab === 'feed'}
-          onPress={() => setActiveTab('feed')}
+  return (
+    <View style={styles.screen}>
+      <BrandHeader
+        title="Community"
+        subtitle="Share ideas and stay connected."
+        action={
+          <Pressable
+            onPress={() => router.push('/leaderboard')}
+            hitSlop={spacing.sm}
+            accessibilityRole="button"
+            accessibilityLabel="Open the contributor leaderboard"
+            style={({ pressed }) => [styles.headerAction, pressed && styles.headerActionPressed]}>
+            <Ionicons name="trophy" size={sizes.iconMd} color={brand.yellow} />
+          </Pressable>
+        }>
+        <SegmentedTabs
+          tone="dark"
+          accessibilityLabel="Community sections"
+          value={activeTab}
+          onChange={setActiveTab}
+          options={[
+            { value: 'feed', label: 'Feed', icon: 'newspaper-outline' },
+            { value: 'chats', label: 'Chats', icon: 'chatbubbles-outline', badge: unreadChats },
+          ]}
         />
-        <CommunityTabButton
-          label="Chats"
-          selected={activeTab === 'chats'}
-          onPress={() => setActiveTab('chats')}
-        />
+      </BrandHeader>
+
+      <View style={styles.body}>
+        {activeTab === 'feed' ? (
+          <CommunityFeed />
+        ) : loadingChats ? (
+          <LoadingState label="Loading chats…" />
+        ) : chatError ? (
+          <ErrorState message={chatError} onRetry={() => setRetryKey((current) => current + 1)} />
+        ) : chats.length === 0 ? (
+          <View style={styles.empty}>
+            <EmptyState
+              icon="chatbubbles-outline"
+              iconColor={brand.blue}
+              title="No conversations yet"
+              message="Find someone on Discover, open their profile and say hello — your chats will live here."
+              actionLabel="Discover members"
+              onAction={() => router.push('/discovery')}
+            />
+          </View>
+        ) : (
+          <ScrollView contentContainerStyle={styles.chatList} showsVerticalScrollIndicator={false}>
+            {chats.map((chat) => {
+              const otherUserId = chat.participantIds.find((uid) => uid !== profile.uid);
+              const otherParticipant = otherUserId ? chat.participants?.[otherUserId] : undefined;
+
+              return (
+                <ChatListRow
+                  key={chat.id}
+                  chat={chat}
+                  currentUserId={profile.uid}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/chat/[id]',
+                      params: { id: chat.id, participantName: otherParticipant?.name || 'Direct message' },
+                    })
+                  }
+                />
+              );
+            })}
+          </ScrollView>
+        )}
       </View>
-
-      {activeTab === 'feed' ? (
-        <CommunityFeed />
-      ) : loadingChats ? (
-        <LoadingState label="Loading chats…" />
-      ) : chatError ? (
-        <ErrorState message={chatError} onRetry={() => setRetryKey((current) => current + 1)} />
-      ) : chats.length === 0 ? (
-        <View style={styles.empty}>
-          <EmptyState
-            icon="chatbubbles-outline"
-            title="No conversations yet"
-            message="Open a member's profile and send them a message to start a chat."
-            actionLabel="Discover members"
-            onAction={() => router.push('/discovery')}
-          />
-        </View>
-      ) : (
-        <ScrollView contentContainerStyle={styles.chatList} showsVerticalScrollIndicator={false}>
-          {chats.map((chat) => {
-            const otherUserId = chat.participantIds.find((uid) => uid !== profile.uid);
-            const otherParticipant = otherUserId ? chat.participants?.[otherUserId] : undefined;
-
-            return (
-              <ChatListRow
-                key={chat.id}
-                chat={chat}
-                currentUserId={profile.uid}
-                onPress={() =>
-                  router.push({
-                    pathname: '/chat/[id]',
-                    params: { id: chat.id, participantName: otherParticipant?.name || 'Direct message' },
-                  })
-                }
-              />
-            );
-          })}
-        </ScrollView>
-      )}
-    </SafeAreaView>
-  );
-}
-
-function CommunityTabButton({
-  label,
-  selected,
-  onPress,
-}: {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="tab"
-      accessibilityState={{ selected }}
-      accessibilityLabel={`${label} tab`}
-      onPress={onPress}
-      style={({ pressed }) => [styles.tab, selected && styles.tabSelected, pressed && styles.tabPressed]}>
-      <Text style={[styles.tabText, selected && styles.tabTextSelected]}>{label}</Text>
-    </Pressable>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: {
+  screen: {
     flex: 1,
     backgroundColor: colors.bg,
   },
-  tabBar: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.lg,
-    padding: spacing.xs,
-    borderRadius: radius.md,
-    backgroundColor: colors.surfaceAlt,
-  },
-  tab: {
+  body: {
     flex: 1,
-    minHeight: sizes.touchMin,
+    paddingTop: spacing.lg,
+  },
+  headerAction: {
+    width: sizes.touchMin,
+    height: sizes.touchMin,
+    borderRadius: radius.full,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.sm,
+    backgroundColor: brand.onInk,
   },
-  tabSelected: {
-    backgroundColor: colors.surface,
-  },
-  tabPressed: {
-    backgroundColor: colors.accentSurface,
-  },
-  tabText: {
-    ...type.bodyStrong,
-    color: colors.inkMuted,
-  },
-  tabTextSelected: {
-    color: colors.accent,
+  headerActionPressed: {
+    backgroundColor: brand.onInkBorder,
   },
   chatList: {
     gap: spacing.sm,

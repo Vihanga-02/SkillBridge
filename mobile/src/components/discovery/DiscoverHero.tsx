@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/ui/Avatar';
+import { BrandHeader, brandHeaderText } from '@/components/ui/BrandHeader';
 import { brand, colors, radius, sizes, spacing, type } from '@/constants/theme';
 
 type Props = {
@@ -21,10 +21,7 @@ function greeting(hour: number): string {
   return 'Good evening';
 }
 
-/**
- * The first thing a signed-in user sees: a navy panel (the tab bar's colour)
- * with the logo's colours as soft shapes behind a personal greeting and search.
- */
+/** The first thing a signed-in user sees: a personal greeting above search. */
 export function DiscoverHero({
   name,
   avatarUrl,
@@ -34,28 +31,16 @@ export function DiscoverHero({
   onOpenFilters,
   onPressAvatar,
 }: Props) {
-  const insets = useSafeAreaInsets();
   const firstName = name.trim().split(/\s+/)[0] || 'there';
 
   return (
-    <View style={[styles.hero, { paddingTop: insets.top + spacing.lg }]}>
-      {/* Decorative logo-colour shapes; purely visual, hidden from screen readers. */}
-      <View
-        pointerEvents="none"
-        accessibilityElementsHidden
-        importantForAccessibility="no-hide-descendants"
-        style={StyleSheet.absoluteFill}>
-        <View style={[styles.blob, styles.blobBlue]} />
-        <View style={[styles.blob, styles.blobGreen]} />
-        <View style={[styles.dot, styles.dotYellow]} />
-      </View>
-
+    <BrandHeader>
       <View style={styles.topRow}>
         <View style={styles.titles}>
-          <Text style={styles.greeting} numberOfLines={1}>
+          <Text style={brandHeaderText.title} numberOfLines={1} accessibilityRole="header">
             {greeting(new Date().getHours())}, {firstName}
           </Text>
-          <Text style={styles.subtitle}>Find someone to learn from today.</Text>
+          <Text style={brandHeaderText.subtitle}>Find someone to learn from today.</Text>
         </View>
         <Pressable
           onPress={onPressAvatar}
@@ -95,9 +80,7 @@ export function DiscoverHero({
         <Pressable
           onPress={onOpenFilters}
           accessibilityRole="button"
-          accessibilityLabel={
-            filterCount > 0 ? `Filters, ${filterCount} active` : 'Filters'
-          }
+          accessibilityLabel={filterCount > 0 ? `Filters, ${filterCount} active` : 'Filters'}
           style={({ pressed }) => [styles.filterButton, pressed && styles.filterButtonPressed]}>
           <Ionicons name="options-outline" size={sizes.iconLg} color={colors.ink} />
           {filterCount > 0 ? (
@@ -107,52 +90,11 @@ export function DiscoverHero({
           ) : null}
         </Pressable>
       </View>
-    </View>
+    </BrandHeader>
   );
 }
 
-const BLOB = sizes.avatarLg * 2;
-const DOT = sizes.avatarMd;
-
 const styles = StyleSheet.create({
-  hero: {
-    gap: spacing.lg,
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xl,
-    backgroundColor: colors.ink,
-    borderBottomLeftRadius: radius.lg,
-    borderBottomRightRadius: radius.lg,
-    overflow: 'hidden',
-  },
-  blob: {
-    position: 'absolute',
-    width: BLOB,
-    height: BLOB,
-    borderRadius: radius.full,
-    opacity: 0.22,
-  },
-  blobBlue: {
-    backgroundColor: brand.blue,
-    top: -BLOB / 3,
-    right: -BLOB / 4,
-  },
-  blobGreen: {
-    backgroundColor: brand.green,
-    bottom: -BLOB / 2,
-    left: -BLOB / 3,
-  },
-  dot: {
-    position: 'absolute',
-    width: DOT,
-    height: DOT,
-    borderRadius: radius.full,
-    opacity: 0.5,
-  },
-  dotYellow: {
-    backgroundColor: brand.yellow,
-    top: spacing.xxl * 2,
-    right: spacing.xxl * 3,
-  },
   topRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -161,14 +103,6 @@ const styles = StyleSheet.create({
   titles: {
     flex: 1,
     gap: spacing.xs,
-  },
-  greeting: {
-    ...type.h1,
-    color: colors.inkInverse,
-  },
-  subtitle: {
-    ...type.body,
-    color: colors.inkInverseMuted,
   },
   avatarRing: {
     padding: 2,

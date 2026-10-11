@@ -42,6 +42,13 @@ export const brand = {
   green: '#01A02E',
   yellow: '#FDBF00',
   navy: '#002561',
+  /** Light tints behind brand-coloured icons (icon circles, tiles). */
+  blueSurface: '#E6F1FC',
+  greenSurface: '#E6F6EA',
+  navySurface: '#E6EAF1',
+  /** Translucent white for controls sitting on the navy `ink` header. */
+  onInk: 'rgba(255, 255, 255, 0.12)',
+  onInkBorder: 'rgba(255, 255, 255, 0.2)',
 } as const;
 
 export const spacing = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 } as const;

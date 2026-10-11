@@ -1,7 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
-import { useIsFocused } from '@react-navigation/native';
 import { router } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
 import { useCallback, useMemo, useState } from 'react';
 import { FlatList, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown, ReduceMotion } from 'react-native-reanimated';
@@ -21,6 +18,7 @@ import { LoadingState } from '@/components/ui/LoadingState';
 import { SkeletonList } from '@/components/ui/Skeleton';
 import { UserCard } from '@/components/user/UserCard';
 import { goalLabel, type CareerGoalTag } from '@/constants/careerGoals';
+import { CATEGORY_STYLE } from '@/constants/categoryStyle';
 import { PAGE_SIZE } from '@/constants/config';
 import {
   CATEGORIES,
@@ -39,15 +37,6 @@ import { searchUsers } from '@/services/userService';
 import type { User } from '@/types';
 import { rankInBatches, type PeerMatch } from '@/utils/peerMatch';
 
-type IconName = keyof typeof Ionicons.glyphMap;
-
-const CATEGORY_ICON: Record<Category, { name: IconName; color: string }> = {
-  Programming: { name: 'code-slash', color: brand.blue },
-  Design: { name: 'color-palette', color: brand.green },
-  Business: { name: 'briefcase', color: colors.accent },
-  Academic: { name: 'school', color: brand.navy },
-};
-
 /** Cards past this index appear without a stagger, so long lists never lag. */
 const STAGGERED_CARDS = 8;
 const TOP_RATED_COUNT = 5;
@@ -56,7 +45,6 @@ type Row = { user: User; match?: PeerMatch };
 
 export default function DiscoveryScreen() {
   const { profile } = useAuth();
-  const isFocused = useIsFocused();
 
   const [text, setText] = useState('');
   const [browseMode, setBrowseMode] = useState<BrowseMode>('category');
@@ -199,8 +187,6 @@ export default function DiscoveryScreen() {
 
   return (
     <View style={styles.screen}>
-      {isFocused ? <StatusBar style="light" /> : null}
-
       <DiscoverHero
         name={profile?.name ?? ''}
         avatarUrl={profile?.avatarUrl}
@@ -226,8 +212,8 @@ export default function DiscoveryScreen() {
             <Chip
               key={item}
               label={item}
-              icon={CATEGORY_ICON[item].name}
-              iconColor={CATEGORY_ICON[item].color}
+              icon={CATEGORY_STYLE[item].icon}
+              iconColor={CATEGORY_STYLE[item].color}
               selected={browseMode === 'category' && category === item}
               onPress={() => quickCategory(category === item ? null : item)}
               showCheck={false}

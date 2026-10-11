@@ -3,21 +3,34 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { BrandHeader } from '@/components/ui/BrandHeader';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Chip } from '@/components/ui/Chip';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { Notice } from '@/components/ui/Notice';
-import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { CAREER_GOALS, type CareerGoalTag } from '@/constants/careerGoals';
-import { colors, sizes, spacing, type } from '@/constants/theme';
+import { CATEGORY_STYLE } from '@/constants/categoryStyle';
+import { LEVEL_LABELS } from '@/constants/skills';
+import { brand, colors, radius, shadow, sizes, spacing, type } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { enrollInLesson, getLesson, listEnrollmentIds, listLessons } from '@/services/lessonService';
 import type { Lesson } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
+import { plural } from '@/utils/format';
+
+/** Category icon + tint for a lesson, with a neutral book for older lessons that lack one. */
+function lessonStyle(lesson: Lesson) {
+  return (
+    (lesson.category && CATEGORY_STYLE[lesson.category]) || {
+      icon: 'book' as const,
+      color: brand.blue,
+      surface: brand.blueSurface,
+    }
+  );
+}
 
 export default function FeedScreen() {
   const { profile } = useAuth();
@@ -52,12 +65,32 @@ export default function FeedScreen() {
     }, [load])
   );
 
-  const filtered = useMemo(
-    () => lessons.filter((lesson) => !careerGoal || lesson.careerGoalId === careerGoal),
-    [lessons, careerGoal]
+  const learnerGoals = useMemo(
+    () => new Set<string>((profile?.careerGoals ?? []).map((goal) => goal.goal)),
+    [profile?.careerGoals]
   );
 
-  const learnerGoals = new Set((profile?.careerGoals ?? []).map((goal) => goal.goal));
+  /** Lessons for the learner's own career goals come first; order is otherwise unchanged. */
+  const filtered = useMemo(() => {
+    const rows = lessons.filter((lesson) => !careerGoal || lesson.careerGoalId === careerGoal);
+    const mine = rows.filter((lesson) => learnerGoals.has(lesson.careerGoalId));
+    const rest = rows.filter((lesson) => !learnerGoals.has(lesson.careerGoalId));
+    return [...mine, ...rest];
+  }, [lessons, careerGoal, learnerGoals]);
+
+  const continueLessons = useMemo(
+    () => lessons.filter((lesson) => enrolledIds.has(lesson.id) && !lesson.deleting),
+    [lessons, enrolledIds]
+  );
+
+  /** The learner's goals lead the chip row too. */
+  const goalChips = useMemo(
+    () => [
+      ...CAREER_GOALS.filter((goal) => learnerGoals.has(goal.tag)),
+      ...CAREER_GOALS.filter((goal) => !learnerGoals.has(goal.tag)),
+    ],
+    [learnerGoals]
+  );
 
   async function enroll(lesson: Lesson) {
     if (!profile) return;
@@ -75,10 +108,15 @@ export default function FeedScreen() {
     }
   }
 
+  const isLearner = !!profile && profile.role !== 'teacher';
+  const subtitle = isLearner
+    ? `${plural(lessons.length, 'lesson')} · ${enrolledIds.size} enrolled`
+    : 'Lessons created by SkillBridge teachers.';
+
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <View style={styles.screen}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <ScreenHeader title="Learn" subtitle="Lessons created by SkillBridge teachers." />
+        <BrandHeader title="Learn" subtitle={loading ? 'Lessons created by SkillBridge teachers.' : subtitle} />
 
         {error ? (
           <View style={styles.padded}>
@@ -90,95 +128,174 @@ export default function FeedScreen() {
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.filters}>
-          <Chip size="sm" label="All" selected={!careerGoal} onPress={() => setCareerGoal(null)} />
-          {CAREER_GOALS.map((goal) => (
+          <Chip label="All" icon="apps" selected={!careerGoal} onPress={() => setCareerGoal(null)} />
+          {goalChips.map((goal) => (
             <Chip
               key={goal.tag}
-              size="sm"
               label={goal.label}
+              icon={learnerGoals.has(goal.tag) ? 'star' : undefined}
+              iconColor={colors.accent}
               selected={careerGoal === goal.tag}
               onPress={() => setCareerGoal(careerGoal === goal.tag ? null : goal.tag)}
+              showCheck={false}
             />
           ))}
         </ScrollView>
+
+        {!loading && !careerGoal && continueLessons.length > 0 ? (
+          <View style={styles.section}>
+            <View style={[styles.sectionHeader, styles.padded]}>
+              <Ionicons name="play-circle" size={sizes.iconMd} color={brand.green} />
+              <Text style={styles.sectionTitle}>Continue learning</Text>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.carousel}>
+              {continueLessons.map((lesson) => {
+                const style = lessonStyle(lesson);
+                return (
+                  <Pressable
+                    key={lesson.id}
+                    onPress={() => router.push({ pathname: '/lesson/[id]', params: { id: lesson.id } })}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Continue ${lesson.lessonName}`}
+                    style={({ pressed }) => [styles.continueCard, pressed && styles.pressedScale]}>
+                    <View style={[styles.tile, { backgroundColor: style.surface }]}>
+                      <Ionicons name={style.icon} size={sizes.iconLg} color={style.color} />
+                    </View>
+                    <Text style={styles.continueTitle} numberOfLines={2}>
+                      {lesson.lessonName}
+                    </Text>
+                    <View style={styles.continueFooter}>
+                      <Text style={styles.caption} numberOfLines={1}>
+                        By {lesson.teacherName || 'SkillBridge teacher'}
+                      </Text>
+                      <View style={styles.playButton}>
+                        <Ionicons name="play" size={sizes.iconSm} color={colors.inkInverse} />
+                      </View>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+        ) : null}
 
         {loading ? (
           <LoadingState label="Loading lessons..." />
         ) : filtered.length === 0 ? (
           <EmptyState
             icon="book-outline"
-            title="No lessons yet"
-            message="Teacher-created lessons for this career goal will appear here."
+            iconColor={brand.blue}
+            title="No lessons here yet"
+            message="Teacher-created lessons for this career goal will show up here as soon as they are published."
           />
         ) : (
-          <View style={styles.list}>
-            {filtered.map((lesson) => {
-              const isOwnLesson = lesson.teacherId === profile?.uid;
-              const isEnrolled = enrolledIds.has(lesson.id);
-              const canOpen = isEnrolled || (isOwnLesson && profile?.role === 'teacher');
-              const canEnroll = !!profile && profile.role !== 'teacher' && !isEnrolled && !lesson.deleting;
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, styles.padded]}>
+              {careerGoal ? 'Lessons for this goal' : learnerGoals.size > 0 ? 'Picked for your goals first' : 'All lessons'}
+            </Text>
+            <View style={styles.list}>
+              {filtered.map((lesson) => {
+                const isOwnLesson = lesson.teacherId === profile?.uid;
+                const isEnrolled = enrolledIds.has(lesson.id);
+                const canOpen = isEnrolled || (isOwnLesson && profile?.role === 'teacher');
+                const canEnroll = !!profile && profile.role !== 'teacher' && !isEnrolled && !lesson.deleting;
+                const style = lessonStyle(lesson);
+                const isGoal = learnerGoals.has(lesson.careerGoalId);
 
-              return (
-                <Card key={lesson.id}>
-                  <View style={styles.cardBody}>
-                    <Pressable
-                      onPress={() =>
-                        router.push({ pathname: '/lesson/details/[id]', params: { id: lesson.id } })
-                      }
-                      accessibilityRole="button"
-                      accessibilityLabel={`View details for ${lesson.lessonName}`}
-                      style={({ pressed }) => [styles.lessonTop, pressed && styles.pressed]}>
-                      <View style={styles.lessonText}>
-                        <Text style={styles.title}>{lesson.lessonName}</Text>
-                        <Text style={styles.meta}>Career Goal: {lesson.careerGoalName}</Text>
-                        <Text style={styles.teacher}>By {lesson.teacherName || 'SkillBridge teacher'}</Text>
-                      </View>
-                      <Ionicons name="chevron-forward" size={sizes.iconMd} color={colors.inkFaint} />
-                    </Pressable>
-
-                    <View style={styles.metaRow}>
-                      <Ionicons name="albums-outline" size={sizes.iconSm} color={colors.inkMuted} />
-                      <Text style={styles.caption}>
-                        {lesson.contents.length} content {lesson.contents.length === 1 ? 'item' : 'items'}
-                      </Text>
-                      <EnrollmentCount count={lesson.enrollmentCount} />
-                      {learnerGoals.has(lesson.careerGoalId) ? (
-                        <Text style={styles.match}>Your goal</Text>
-                      ) : null}
-                    </View>
-
-                    <Button
-                      label={isEnrolled ? 'Continue Learning' : canOpen ? 'Open lesson' : 'Enroll'}
-                      variant={canEnroll ? 'primary' : 'secondary'}
-                      icon={canOpen ? 'play-outline' : 'add-outline'}
-                      loading={enrollingId === lesson.id}
-                      disabled={!canOpen && !canEnroll}
-                      onPress={() => {
-                        if (canEnroll) void enroll(lesson);
-                        else if (canOpen) {
-                          router.push({ pathname: '/lesson/[id]', params: { id: lesson.id } });
+                return (
+                  <Card key={lesson.id} style={isGoal ? styles.goalCard : undefined}>
+                    <View style={styles.cardBody}>
+                      <Pressable
+                        onPress={() =>
+                          router.push({ pathname: '/lesson/details/[id]', params: { id: lesson.id } })
                         }
-                      }}
-                    />
-                  </View>
-                </Card>
-              );
-            })}
+                        accessibilityRole="button"
+                        accessibilityLabel={`View details for ${lesson.lessonName}`}
+                        style={({ pressed }) => [styles.lessonTop, pressed && styles.pressed]}>
+                        <View style={[styles.tile, { backgroundColor: style.surface }]}>
+                          <Ionicons name={style.icon} size={sizes.iconLg} color={style.color} />
+                        </View>
+                        <View style={styles.lessonText}>
+                          {isGoal ? (
+                            <View style={styles.goalBadge}>
+                              <Ionicons name="star" size={sizes.iconSm} color={colors.accent} />
+                              <Text style={styles.goalBadgeText}>Your goal</Text>
+                            </View>
+                          ) : null}
+                          <Text style={styles.title} numberOfLines={2}>
+                            {lesson.lessonName}
+                          </Text>
+                          <Text style={styles.teacher}>By {lesson.teacherName || 'SkillBridge teacher'}</Text>
+                        </View>
+                        <Ionicons name="chevron-forward" size={sizes.iconMd} color={colors.inkFaint} />
+                      </Pressable>
+
+                      <View style={styles.pillRow}>
+                        {lesson.careerGoalName ? (
+                          <InfoPill icon="flag-outline" label={lesson.careerGoalName} />
+                        ) : null}
+                        {lesson.level && LEVEL_LABELS[lesson.level] ? (
+                          <InfoPill icon="stats-chart-outline" label={LEVEL_LABELS[lesson.level]} />
+                        ) : null}
+                        <InfoPill
+                          icon="albums-outline"
+                          label={`${lesson.contents.length} content ${lesson.contents.length === 1 ? 'item' : 'items'}`}
+                        />
+                      </View>
+
+                      <View style={styles.enrolledRow}>
+                        <EnrollmentCount count={lesson.enrollmentCount} />
+                      </View>
+
+                      <Button
+                        label={isEnrolled ? 'Continue Learning' : canOpen ? 'Open lesson' : 'Enroll'}
+                        variant={canEnroll ? 'primary' : 'secondary'}
+                        icon={canOpen ? 'play-outline' : 'add-outline'}
+                        loading={enrollingId === lesson.id}
+                        disabled={!canOpen && !canEnroll}
+                        onPress={() => {
+                          if (canEnroll) void enroll(lesson);
+                          else if (canOpen) {
+                            router.push({ pathname: '/lesson/[id]', params: { id: lesson.id } });
+                          }
+                        }}
+                      />
+                    </View>
+                  </Card>
+                );
+              })}
+            </View>
           </View>
         )}
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
+function InfoPill({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label: string }) {
+  return (
+    <View style={styles.infoPill}>
+      <Ionicons name={icon} size={sizes.iconSm} color={colors.inkMuted} />
+      <Text style={styles.infoPillText} numberOfLines={1}>
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+const TILE = sizes.control + spacing.xs;
+const CONTINUE_WIDTH = sizes.avatarLg * 2 + spacing.lg;
+
 const styles = StyleSheet.create({
-  safe: {
+  screen: {
     flex: 1,
     backgroundColor: colors.bg,
   },
   content: {
     gap: spacing.lg,
-    paddingTop: spacing.lg,
     paddingBottom: spacing.xxl,
   },
   padded: {
@@ -188,12 +305,63 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingHorizontal: spacing.lg,
   },
+  section: {
+    gap: spacing.md,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  sectionTitle: {
+    ...type.h2,
+    color: colors.ink,
+  },
+  carousel: {
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xs,
+  },
+  continueCard: {
+    width: CONTINUE_WIDTH,
+    gap: spacing.sm,
+    padding: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: colors.border,
+    ...shadow.card,
+  },
+  continueTitle: {
+    ...type.bodyStrong,
+    color: colors.ink,
+    minHeight: type.bodyStrong.lineHeight * 2,
+  },
+  continueFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  playButton: {
+    width: sizes.avatarSm,
+    height: sizes.avatarSm,
+    borderRadius: radius.full,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pressedScale: {
+    transform: [{ scale: 0.97 }],
+  },
   list: {
     gap: spacing.md,
     paddingHorizontal: spacing.lg,
   },
   pressed: {
     opacity: 0.8,
+  },
+  goalCard: {
+    borderColor: colors.accent,
   },
   cardBody: {
     gap: spacing.md,
@@ -203,34 +371,65 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
   },
+  tile: {
+    width: TILE,
+    height: TILE,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   lessonText: {
     flex: 1,
     gap: spacing.xs,
+  },
+  goalBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: radius.full,
+    backgroundColor: colors.accentSurface,
+  },
+  goalBadgeText: {
+    ...type.caption,
+    fontWeight: '600',
+    color: colors.accent,
   },
   title: {
     ...type.h2,
     color: colors.ink,
   },
-  meta: {
-    ...type.body,
-    color: colors.inkMuted,
-  },
   teacher: {
     ...type.caption,
     color: colors.inkMuted,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
   },
   caption: {
     ...type.caption,
     color: colors.inkMuted,
     flex: 1,
   },
-  match: {
+  pillRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  infoPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
+    backgroundColor: colors.surfaceAlt,
+  },
+  infoPillText: {
     ...type.caption,
-    color: colors.accent,
+    color: colors.inkMuted,
+  },
+  enrolledRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
 });

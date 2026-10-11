@@ -4,7 +4,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { Avatar } from '@/components/ui/Avatar';
 import { Card } from '@/components/ui/Card';
-import { colors, radius, sizes, spacing, type } from '@/constants/theme';
+import { brand, colors, radius, sizes, spacing, type } from '@/constants/theme';
 import type { Chat } from '@/types';
 import { toDate } from '@/utils/date';
 
@@ -25,7 +25,9 @@ export function ChatListRow({ chat, currentUserId, onPress }: Props) {
   return (
     <Card onPress={onPress} padded={false} accessibilityLabel={`Open chat with ${name}`}>
       <View style={styles.row}>
-        <Avatar name={name} uri={otherParticipant?.avatarUrl || undefined} size="md" />
+        <View style={[styles.avatarRing, unread > 0 && styles.avatarRingUnread]}>
+          <Avatar name={name} uri={otherParticipant?.avatarUrl || undefined} size="md" />
+        </View>
 
         <View style={styles.copy}>
           <View style={styles.topLine}>
@@ -66,6 +68,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
     padding: spacing.lg,
+  },
+  avatarRing: {
+    padding: 2,
+    borderRadius: radius.full,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  avatarRingUnread: {
+    borderColor: brand.blue,
   },
   copy: {
     flex: 1,

@@ -3,22 +3,23 @@ import DateTimePicker, {
   DateTimePickerAndroid,
   type DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
-import { format, isSameDay, startOfDay } from 'date-fns';
+import { format, formatDistanceToNowStrict, isSameDay, startOfDay } from 'date-fns';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BookingCard } from '@/components/session/BookingCard';
 import { SessionCard } from '@/components/session/SessionCard';
+import { BrandHeader } from '@/components/ui/BrandHeader';
 import { Button } from '@/components/ui/Button';
 import { Chip } from '@/components/ui/Chip';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { Notice } from '@/components/ui/Notice';
-import { ScreenHeader } from '@/components/ui/ScreenHeader';
+import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
+import { CATEGORY_STYLE } from '@/constants/categoryStyle';
 import { CATEGORIES, skillLabel, type Category } from '@/constants/skills';
-import { colors, radius, sizes, spacing, type } from '@/constants/theme';
+import { brand, colors, radius, shadow, sizes, spacing, type } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import {
   approveBooking,
@@ -29,6 +30,7 @@ import {
 import { deleteSession, getSessionsByTeacher, listUpcomingSessions } from '@/services/sessionService';
 import type { Booking, Session } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
+import { SESSION_MODE_LABEL, formatSessionTime } from '@/utils/sessionFormat';
 
 type SessionsView = 'browse' | 'bookings' | 'teaching';
 type BrowseScope = 'all' | 'forYou';
@@ -116,6 +118,18 @@ export default function SessionsScreen() {
   const upcomingBookings = learnerBookings.filter((booking) =>
     ['pending', 'confirmed'].includes(booking.status)
   );
+  /** The learner's soonest confirmed session that has not started yet. */
+  const nextUp = useMemo(() => {
+    const now = Date.now();
+    return (
+      learnerBookings
+        .filter(
+          (booking) =>
+            booking.status === 'confirmed' && (booking.startAt?.toMillis?.() ?? 0) > now
+        )
+        .sort((a, b) => (a.startAt?.toMillis?.() ?? 0) - (b.startAt?.toMillis?.() ?? 0))[0] ?? null
+    );
+  }, [learnerBookings]);
   const pastBookings = learnerBookings.filter((booking) => booking.status === 'completed');
   const cancelledBookings = learnerBookings.filter((booking) =>
     ['cancelled', 'declined'].includes(booking.status)
@@ -264,8 +278,8 @@ export default function SessionsScreen() {
   const teachingView = teacherOnly || (dualRole && view === 'teaching');
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScreenHeader
+    <View style={styles.safe}>
+      <BrandHeader
         title={teacherOnly ? 'Teacher Sessions' : 'Sessions'}
         subtitle={
           teacherOnly
@@ -274,28 +288,32 @@ export default function SessionsScreen() {
         }
         action={
           canTeach ? (
-            <Button label="Create" variant="ghost" onPress={() => router.push('/session/create')} />
+            <Pressable
+              onPress={() => router.push('/session/create')}
+              accessibilityRole="button"
+              accessibilityLabel="Create a session"
+              style={({ pressed }) => [styles.createButton, pressed && styles.createButtonPressed]}>
+              <Ionicons name="add" size={sizes.iconMd} color={colors.ink} />
+              <Text style={styles.createButtonText}>Create</Text>
+            </Pressable>
           ) : undefined
-        }
-      />
-
-      {!teacherOnly ? (
-        <View style={styles.segment}>
-          <SegmentButton label="Browse" selected={view === 'browse'} onPress={() => setView('browse')} />
-          <SegmentButton
-            label="My Sessions"
-            selected={view === 'bookings'}
-            onPress={() => setView('bookings')}
+        }>
+        {!teacherOnly ? (
+          <SegmentedTabs
+            tone="dark"
+            accessibilityLabel="Sessions views"
+            value={view}
+            onChange={setView}
+            options={[
+              { value: 'browse', label: 'Browse' },
+              { value: 'bookings', label: 'My Sessions', badge: upcomingBookings.length },
+              ...(dualRole
+                ? [{ value: 'teaching' as const, label: 'Teaching', badge: pendingRequests.length }]
+                : []),
+            ]}
           />
-          {dualRole ? (
-            <SegmentButton
-              label="Teaching"
-              selected={view === 'teaching'}
-              onPress={() => setView('teaching')}
-            />
-          ) : null}
-        </View>
-      ) : null}
+        ) : null}
+      </BrandHeader>
 
       {bookingsError ? (
         <View style={styles.noticeWrap}>
@@ -314,6 +332,7 @@ export default function SessionsScreen() {
       {!teacherOnly && view === 'browse' && !sessionsLoading ? (
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           {sessionsError ? <Notice tone="error" message={sessionsError} /> : null}
+          {nextUp ? <NextUpCard booking={nextUp} onPress={() => openBooking(nextUp.id)} /> : null}
           <View style={styles.searchRow}>
             <View style={styles.searchBox}>
               <Ionicons name="search-outline" size={sizes.iconMd} color={colors.inkMuted} />
@@ -354,14 +373,16 @@ export default function SessionsScreen() {
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.categoryRow}>
-            <Chip size="sm" label="All" selected={!category} onPress={() => setCategory(null)} />
+            <Chip label="All" icon="apps" selected={!category} onPress={() => setCategory(null)} />
             {CATEGORIES.map((item) => (
               <Chip
                 key={item}
-                size="sm"
                 label={item}
+                icon={CATEGORY_STYLE[item].icon}
+                iconColor={CATEGORY_STYLE[item].color}
                 selected={category === item}
                 onPress={() => setCategory(item)}
+                showCheck={false}
               />
             ))}
           </ScrollView>
@@ -471,6 +492,29 @@ export default function SessionsScreen() {
       {teachingView && !sessionsLoading && !bookingsLoading ? (
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           {sessionsError ? <Notice tone="error" message={sessionsError} /> : null}
+          <View style={styles.summaryRow}>
+            <SummaryTile
+              icon="mail-unread-outline"
+              color={colors.danger}
+              surface={colors.surfaceAlt}
+              value={pendingRequests.length}
+              label="Pending requests"
+            />
+            <SummaryTile
+              icon="calendar-outline"
+              color={brand.blue}
+              surface={brand.blueSurface}
+              value={upcomingOffers.length}
+              label="Hosting soon"
+            />
+            <SummaryTile
+              icon="checkmark-done-outline"
+              color={brand.green}
+              surface={brand.greenSurface}
+              value={scheduledTeaching.length}
+              label="Confirmed"
+            />
+          </View>
           <View style={styles.teachingTabs}>
             <TeachingTab
               label="Requests"
@@ -609,7 +653,7 @@ export default function SessionsScreen() {
           )}
         </ScrollView>
       ) : null}
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -691,8 +735,59 @@ function BookingList({
   );
 }
 
-function SegmentButton({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
-  return <Button label={label} variant={selected ? 'secondary' : 'ghost'} onPress={onPress} style={styles.segmentButton} />;
+/** The learner's soonest confirmed session, pinned above Browse so it is never missed. */
+function NextUpCard({ booking, onPress }: { booking: Booking; onPress: () => void }) {
+  const start = booking.startAt?.toDate?.();
+  const when = start ? formatDistanceToNowStrict(start, { addSuffix: true }) : 'soon';
+
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`Next up: ${booking.sessionTitle}, starts ${when}`}
+      style={({ pressed }) => [styles.nextUp, pressed && styles.nextUpPressed]}>
+      <View style={styles.nextUpIcon}>
+        <Ionicons name="flash" size={sizes.iconMd} color={colors.inkInverse} />
+      </View>
+      <View style={styles.nextUpText}>
+        <Text style={styles.nextUpEyebrow}>NEXT UP · STARTS {when.toUpperCase()}</Text>
+        <Text style={styles.nextUpTitle} numberOfLines={1}>
+          {booking.sessionTitle}
+        </Text>
+        <Text style={styles.nextUpMeta} numberOfLines={1}>
+          with {booking.teacherName} · {formatSessionTime(booking.startAt)} ·{' '}
+          {SESSION_MODE_LABEL[booking.mode]}
+        </Text>
+      </View>
+      <Ionicons name="chevron-forward" size={sizes.iconMd} color={colors.accent} />
+    </Pressable>
+  );
+}
+
+function SummaryTile({
+  icon,
+  color,
+  surface,
+  value,
+  label,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  color: string;
+  surface: string;
+  value: number;
+  label: string;
+}) {
+  return (
+    <View style={styles.summaryTile} accessibilityLabel={`${label}: ${value}`}>
+      <View style={[styles.summaryIcon, { backgroundColor: surface }]}>
+        <Ionicons name={icon} size={sizes.iconMd} color={color} />
+      </View>
+      <Text style={styles.summaryValue}>{value}</Text>
+      <Text style={styles.summaryLabel} numberOfLines={2}>
+        {label}
+      </Text>
+    </View>
+  );
 }
 
 function TeachingTab({
@@ -742,16 +837,62 @@ function TeachingTab({
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
-  segment: {
+  createButton: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: spacing.xs,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.md,
-    padding: spacing.xs,
+    minHeight: sizes.touchMin - spacing.xs,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.full,
+    backgroundColor: colors.surface,
+  },
+  createButtonPressed: { backgroundColor: colors.surfaceAlt },
+  createButtonText: { ...type.label, fontWeight: '700', color: colors.ink },
+  nextUp: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.md,
     borderRadius: radius.md,
     backgroundColor: colors.accentSurface,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: colors.accent,
   },
-  segmentButton: { flex: 1 },
+  nextUpPressed: { opacity: 0.85 },
+  nextUpIcon: {
+    width: sizes.touchMin,
+    height: sizes.touchMin,
+    borderRadius: radius.full,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  nextUpText: { flex: 1, gap: 2 },
+  nextUpEyebrow: { ...type.caption, fontWeight: '700', color: colors.accent, letterSpacing: 0.5 },
+  nextUpTitle: { ...type.bodyStrong, color: colors.ink },
+  nextUpMeta: { ...type.caption, color: colors.inkMuted },
+  summaryRow: { flexDirection: 'row', gap: spacing.sm },
+  summaryTile: {
+    flex: 1,
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xs,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: colors.border,
+    ...shadow.card,
+  },
+  summaryIcon: {
+    width: sizes.touchMin - spacing.sm,
+    height: sizes.touchMin - spacing.sm,
+    borderRadius: radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  summaryValue: { ...type.h1, color: colors.ink },
+  summaryLabel: { ...type.caption, color: colors.inkMuted, textAlign: 'center' },
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -772,7 +913,7 @@ const styles = StyleSheet.create({
   forYouButtonPressed: { opacity: 0.75 },
   forYouButtonText: { ...type.caption, color: colors.inkMuted, fontWeight: '600' },
   forYouButtonTextSelected: { color: colors.accent },
-  noticeWrap: { gap: spacing.sm, paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
+  noticeWrap: { gap: spacing.sm, paddingHorizontal: spacing.lg, paddingTop: spacing.lg },
   content: { gap: spacing.lg, padding: spacing.lg, paddingBottom: spacing.xxl },
   searchBox: {
     flex: 1,

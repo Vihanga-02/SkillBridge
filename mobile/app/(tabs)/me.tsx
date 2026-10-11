@@ -2,17 +2,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, type Href } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/ui/Avatar';
+import { BrandHeader } from '@/components/ui/BrandHeader';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { Chip } from '@/components/ui/Chip';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { Notice } from '@/components/ui/Notice';
-import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { SkillPortfolio } from '@/components/user/SkillPortfolio';
-import { colors, radius, sizes, spacing, type } from '@/constants/theme';
+import { brand, colors, radius, shadow, sizes, spacing, type } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { logout } from '@/services/authService';
 import { subscribeToEnrollmentsByUser, subscribeToLessonsByTeacher } from '@/services/lessonService';
@@ -22,11 +20,23 @@ import { formatDate } from '@/utils/date';
 import { getProfileCompleteness } from '@/utils/profileCompleteness';
 import { nonNegativeCount } from '@/utils/counts';
 
+type IconName = keyof typeof Ionicons.glyphMap;
+
 const ROLE_LABEL: Record<UserRole, string> = {
   learner: 'Learning',
   teacher: 'Teaching',
   both: 'Teaching & learning',
 };
+
+/** Icon tints for stat tiles and menu rows — logo colours on their light surfaces. */
+const TINT = {
+  blue: { color: brand.blue, surface: brand.blueSurface },
+  green: { color: brand.green, surface: brand.greenSurface },
+  teal: { color: colors.accent, surface: colors.accentSurface },
+  navy: { color: brand.navy, surface: brand.navySurface },
+} as const;
+
+type Tint = (typeof TINT)[keyof typeof TINT];
 
 export default function MeScreen() {
   const { profile, firebaseUser } = useAuth();
@@ -89,22 +99,74 @@ export default function MeScreen() {
     ]);
   }
 
+  // Same stats as before: sessions for everyone, then created and/or enrolled lessons by role.
+  const stats: { label: string; value: number | undefined; icon: IconName; tint: Tint }[] = [
+    { label: 'Taught', value: profile.stats?.sessionsTaught, icon: 'easel-outline', tint: TINT.blue },
+    { label: 'Attended', value: profile.stats?.sessionsAttended, icon: 'people-outline', tint: TINT.green },
+    ...(canTeach
+      ? [{ label: 'Created Lessons', value: createdLessonCount, icon: 'create-outline' as IconName, tint: TINT.teal }]
+      : []),
+    ...(canLearn
+      ? [{ label: 'Enrolled Lessons', value: enrolledLessonCount, icon: 'book-outline' as IconName, tint: TINT.navy }]
+      : []),
+  ];
+
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <View style={styles.screen}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <ScreenHeader
+        <BrandHeader
           title="My account"
+          style={styles.header}
           action={
             <Pressable
               onPress={() => router.push('/profile/edit')}
               hitSlop={spacing.sm}
               accessibilityRole="button"
               accessibilityLabel="Edit profile"
-              style={styles.headerAction}>
-              <Ionicons name="create-outline" size={sizes.iconLg} color={colors.ink} />
+              style={({ pressed }) => [styles.headerAction, pressed && styles.headerActionPressed]}>
+              <Ionicons name="create-outline" size={sizes.iconMd} color={colors.inkInverse} />
             </Pressable>
-          }
-        />
+          }>
+          <View style={styles.identity}>
+            <View style={styles.avatarRing}>
+              <Avatar name={profile.name} uri={profile.avatarUrl || undefined} size="lg" />
+            </View>
+            <Text style={styles.name}>{profile.name}</Text>
+            <Text style={styles.email}>{profile.email || firebaseUser?.email}</Text>
+
+            <View style={styles.pillRow}>
+              <HeaderPill icon="person-outline" label={ROLE_LABEL[profile.role]} />
+              <HeaderPill
+                icon="sparkles-outline"
+                label={`${nonNegativeCount(profile.credits)} credits`}
+              />
+            </View>
+
+            <View style={styles.headerMeta}>
+              {profile.location ? (
+                <View style={styles.inline}>
+                  <Ionicons name="location-outline" size={sizes.iconSm} color={colors.inkInverseMuted} />
+                  <Text style={styles.headerMetaText}>{profile.location}</Text>
+                </View>
+              ) : null}
+              <Text style={styles.headerMetaText}>Member since {formatDate(profile.createdAt)}</Text>
+            </View>
+          </View>
+        </BrandHeader>
+
+        {/* Pulled up over the header's bottom edge. */}
+        <View style={[styles.padded, styles.statsGrid]}>
+          {stats.map((stat) => (
+            <View
+              key={stat.label}
+              style={[styles.statTile, stats.length > 3 && styles.statTileHalf]}
+              accessibilityLabel={`${stat.label}: ${nonNegativeCount(stat.value)}`}>
+              <IconCircle icon={stat.icon} tint={stat.tint} />
+              <Text style={styles.statValue}>{nonNegativeCount(stat.value)}</Text>
+              <Text style={styles.statLabel}>{stat.label}</Text>
+            </View>
+          ))}
+        </View>
 
         {error ? (
           <View style={styles.padded}>
@@ -114,39 +176,17 @@ export default function MeScreen() {
 
         <View style={styles.padded}>
           <Card>
-            <View style={styles.identity}>
-              <Avatar name={profile.name} uri={profile.avatarUrl || undefined} size="lg" />
-              <Text style={styles.name}>{profile.name}</Text>
-              <Text style={styles.email}>{profile.email || firebaseUser?.email}</Text>
-
-              <View style={styles.metaRow}>
-                <Chip label={ROLE_LABEL[profile.role]} icon="person-outline" />
-                <Chip label={`${nonNegativeCount(profile.credits)} credits`} icon="sparkles-outline" />
-              </View>
-
-              {profile.location ? (
-                <View style={styles.locationRow}>
-                  <Ionicons name="location-outline" size={sizes.iconSm} color={colors.inkMuted} />
-                  <Text style={styles.muted}>{profile.location}</Text>
-                </View>
-              ) : null}
-
-              <Text style={styles.muted}>Member since {formatDate(profile.createdAt)}</Text>
-            </View>
-          </Card>
-        </View>
-
-        <View style={styles.padded}>
-          <Card>
             <View style={styles.completeness}>
               <View style={styles.completenessHeader}>
                 <View style={styles.completenessHeading}>
-                  <Text style={styles.completenessTitle}>Profile completeness</Text>
+                  <Text style={styles.cardTitle}>Profile completeness</Text>
                   <Text style={styles.muted}>
                     {profileCompleteness.completedCount} of {profileCompleteness.items.length} complete
                   </Text>
                 </View>
-                <Text style={styles.completenessPercent}>{profileCompleteness.percentage}%</Text>
+                <View style={styles.percentBadge}>
+                  <Text style={styles.completenessPercent}>{profileCompleteness.percentage}%</Text>
+                </View>
               </View>
 
               <View
@@ -198,59 +238,54 @@ export default function MeScreen() {
           </Card>
         </View>
 
-        <View style={styles.padded}>
-          <Card>
-            <View style={styles.statsRow}>
-              <Stat label="Taught" value={profile.stats?.sessionsTaught} />
-              <Stat label="Attended" value={profile.stats?.sessionsAttended} />
-              {profile.role !== 'both' ? <Stat label={canTeach ? 'Created Lessons' : 'Enrolled Lessons'}
-                value={canTeach ? createdLessonCount : enrolledLessonCount} /> : null}
-            </View>
-            {profile.role === 'both' ? <View style={[styles.statsRow, { marginTop: spacing.lg }]}>
-              <Stat label="Created Lessons" value={createdLessonCount} />
-              <Stat label="Enrolled Lessons" value={enrolledLessonCount} />
-            </View> : null}
-          </Card>
-        </View>
-
         <View style={styles.section}>
-          <MenuRow
-            icon="eye-outline"
-            label="View my public profile"
-            hint="See exactly what a learner sees"
-            onPress={() => router.push(`/user/${profile.uid}`)}
-          />
-          <MenuRow
-            icon="person-circle-outline"
-            label="Edit profile & skills"
-            onPress={() => router.push('/profile/edit')}
-          />
-          <MenuRow
-            icon="lock-closed-outline"
-            label="Change password"
-            hint="Update the password you use to sign in"
-            onPress={() => router.push('/profile/change-password' as Href)}
-          />
-          {canTeach ? (
+          <Text style={styles.sectionTitle}>Account</Text>
+          <View style={styles.menu}>
             <MenuRow
-              icon="ribbon-outline"
-              label="My credentials"
-              hint={profile.credentialCount > 0 ? `${profile.credentialCount} attached` : 'None yet'}
-              onPress={() => router.push('/profile/credentials')}
+              icon="eye-outline"
+              tint={TINT.blue}
+              label="View my public profile"
+              hint="See exactly what a learner sees"
+              onPress={() => router.push(`/user/${profile.uid}`)}
             />
-          ) : null}
-          <MenuRow
-            icon="book-outline"
-            label="My Lessons"
-            hint={profile.role === 'both' ? 'Created and enrolled lessons' : canTeach ? 'Lessons you created' : 'Lessons you enrolled in'}
-            onPress={() => router.push('/profile/lessons' as Href)}
-          />
-          <MenuRow
-            icon="calendar-outline"
-            label="My bookings"
-            hint="Track requests and teaching"
-            onPress={() => router.push('/(tabs)/sessions')}
-          />
+            <MenuRow
+              icon="person-circle-outline"
+              tint={TINT.green}
+              label="Edit profile & skills"
+              onPress={() => router.push('/profile/edit')}
+            />
+            <MenuRow
+              icon="lock-closed-outline"
+              tint={TINT.navy}
+              label="Change password"
+              hint="Update the password you use to sign in"
+              onPress={() => router.push('/profile/change-password' as Href)}
+            />
+            {canTeach ? (
+              <MenuRow
+                icon="ribbon-outline"
+                tint={TINT.teal}
+                label="My credentials"
+                hint={profile.credentialCount > 0 ? `${profile.credentialCount} attached` : 'None yet'}
+                onPress={() => router.push('/profile/credentials')}
+              />
+            ) : null}
+            <MenuRow
+              icon="book-outline"
+              tint={TINT.blue}
+              label="My Lessons"
+              hint={profile.role === 'both' ? 'Created and enrolled lessons' : canTeach ? 'Lessons you created' : 'Lessons you enrolled in'}
+              onPress={() => router.push('/profile/lessons' as Href)}
+            />
+            <MenuRow
+              icon="calendar-outline"
+              tint={TINT.green}
+              label="My bookings"
+              hint="Track requests and teaching"
+              onPress={() => router.push('/(tabs)/sessions')}
+              last
+            />
+          </View>
         </View>
 
         <View style={styles.section}>
@@ -275,24 +310,53 @@ export default function MeScreen() {
         </View>
 
         <View style={styles.padded}>
-          <Button label="Log out" variant="secondary" icon="log-out-outline" onPress={confirmLogout} />
+          <Pressable
+            onPress={confirmLogout}
+            accessibilityRole="button"
+            accessibilityLabel="Log out"
+            style={({ pressed }) => [styles.logout, pressed && styles.rowPressed]}>
+            <Ionicons name="log-out-outline" size={sizes.iconMd} color={colors.danger} />
+            <Text style={styles.logoutText}>Log out</Text>
+          </Pressable>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
+  );
+}
+
+function HeaderPill({ icon, label }: { icon: IconName; label: string }) {
+  return (
+    <View style={styles.pill}>
+      <Ionicons name={icon} size={sizes.iconSm} color={brand.yellow} />
+      <Text style={styles.pillText}>{label}</Text>
+    </View>
+  );
+}
+
+function IconCircle({ icon, tint }: { icon: IconName; tint: Tint }) {
+  return (
+    <View style={[styles.iconCircle, { backgroundColor: tint.surface }]}>
+      <Ionicons name={icon} size={sizes.iconMd} color={tint.color} />
+    </View>
   );
 }
 
 /** A row without `onPress` renders disabled — the section keeps its final shape. */
 function MenuRow({
   icon,
+  tint,
   label,
   hint,
   onPress,
+  last = false,
 }: {
-  icon: keyof typeof Ionicons.glyphMap;
+  icon: IconName;
+  tint: Tint;
   label: string;
   hint?: string;
   onPress?: () => void;
+  /** Drops the divider under the final row. */
+  last?: boolean;
 }) {
   const disabled = !onPress;
 
@@ -303,8 +367,13 @@ function MenuRow({
       accessibilityRole="button"
       accessibilityState={{ disabled }}
       accessibilityLabel={hint ? `${label}. ${hint}` : label}
-      style={({ pressed }) => [styles.row, pressed && styles.rowPressed, disabled && styles.rowDisabled]}>
-      <Ionicons name={icon} size={sizes.iconMd} color={colors.inkMuted} />
+      style={({ pressed }) => [
+        styles.row,
+        !last && styles.rowDivider,
+        pressed && styles.rowPressed,
+        disabled && styles.rowDisabled,
+      ]}>
+      <IconCircle icon={icon} tint={tint} />
       <View style={styles.rowText}>
         <Text style={styles.rowLabel}>{label}</Text>
         {hint ? <Text style={styles.muted}>{hint}</Text> : null}
@@ -316,24 +385,18 @@ function MenuRow({
   );
 }
 
-function Stat({ label, value }: { label: string; value: number | undefined }) {
-  return (
-    <View style={styles.stat} accessibilityLabel={`${label}: ${nonNegativeCount(value)}`}>
-      <Text style={styles.statValue}>{nonNegativeCount(value)}</Text>
-      <Text style={[styles.muted, { textAlign: 'center' }]}>{label}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  safe: {
+  screen: {
     flex: 1,
     backgroundColor: colors.bg,
   },
   content: {
     gap: spacing.lg,
-    paddingTop: spacing.lg,
     paddingBottom: spacing.xxl,
+  },
+  header: {
+    // Room for the stat tiles to overlap the bottom edge.
+    paddingBottom: spacing.xxl + spacing.xl,
   },
   padded: {
     paddingHorizontal: spacing.lg,
@@ -341,41 +404,109 @@ const styles = StyleSheet.create({
   headerAction: {
     width: sizes.touchMin,
     height: sizes.touchMin,
+    borderRadius: radius.full,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: brand.onInk,
   },
-  section: {
-    gap: spacing.md,
-    paddingHorizontal: spacing.lg,
+  headerActionPressed: {
+    backgroundColor: brand.onInkBorder,
   },
   identity: {
     alignItems: 'center',
     gap: spacing.sm,
   },
+  avatarRing: {
+    padding: spacing.xs,
+    borderRadius: radius.full,
+    borderWidth: 3,
+    borderColor: brand.yellow,
+    marginBottom: spacing.xs,
+  },
   name: {
     ...type.h1,
-    color: colors.ink,
+    color: colors.inkInverse,
+    textAlign: 'center',
   },
   email: {
     ...type.body,
-    color: colors.inkMuted,
+    color: colors.inkInverseMuted,
   },
-  metaRow: {
+  pillRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
     gap: spacing.sm,
     paddingTop: spacing.xs,
   },
-  locationRow: {
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: radius.full,
+    backgroundColor: brand.onInk,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: brand.onInkBorder,
+  },
+  pillText: {
+    ...type.label,
+    color: colors.inkInverse,
+  },
+  headerMeta: {
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  headerMetaText: {
+    ...type.caption,
+    color: colors.inkInverseMuted,
+  },
+  inline: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
   },
+  statsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.md,
+    marginTop: -(spacing.xxl + spacing.lg),
+  },
+  statTile: {
+    flex: 1,
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: colors.border,
+    ...shadow.card,
+  },
+  statTileHalf: {
+    flexBasis: '45%',
+  },
+  statValue: {
+    ...type.h1,
+    color: colors.ink,
+  },
+  statLabel: {
+    ...type.caption,
+    color: colors.inkMuted,
+    textAlign: 'center',
+  },
+  iconCircle: {
+    width: sizes.touchMin - spacing.xs,
+    height: sizes.touchMin - spacing.xs,
+    borderRadius: radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   muted: {
     ...type.caption,
     color: colors.inkMuted,
-  },
-  statsRow: {
-    flexDirection: 'row',
   },
   completeness: {
     gap: spacing.lg,
@@ -389,16 +520,22 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: spacing.xs,
   },
-  completenessTitle: {
+  cardTitle: {
     ...type.h2,
     color: colors.ink,
+  },
+  percentBadge: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
+    backgroundColor: colors.accentSurface,
   },
   completenessPercent: {
     ...type.h1,
     color: colors.accent,
   },
   completenessTrack: {
-    height: spacing.sm,
+    height: spacing.sm + 2,
     overflow: 'hidden',
     borderRadius: radius.full,
     backgroundColor: colors.surfaceAlt,
@@ -424,25 +561,33 @@ const styles = StyleSheet.create({
   checklistDone: {
     color: colors.inkMuted,
   },
-  stat: {
-    flex: 1,
-    alignItems: 'center',
-    gap: spacing.xs,
+  section: {
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
   },
-  statValue: {
-    ...type.h1,
+  sectionTitle: {
+    ...type.h2,
     color: colors.ink,
+  },
+  menu: {
+    overflow: 'hidden',
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: colors.border,
+    ...shadow.card,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    minHeight: sizes.control,
+    minHeight: sizes.control + spacing.md,
     paddingHorizontal: spacing.md,
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: colors.border,
+    paddingVertical: spacing.sm,
+  },
+  rowDivider: {
+    borderBottomWidth: StyleSheet.hairlineWidth * 2,
+    borderBottomColor: colors.border,
   },
   rowPressed: {
     backgroundColor: colors.surfaceAlt,
@@ -457,5 +602,20 @@ const styles = StyleSheet.create({
   rowLabel: {
     ...type.bodyStrong,
     color: colors.ink,
+  },
+  logout: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    minHeight: sizes.control,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: colors.border,
+  },
+  logoutText: {
+    ...type.bodyStrong,
+    color: colors.danger,
   },
 });

@@ -47,6 +47,7 @@ import type {
   User,
 } from '@/types';
 import { uploadFile } from '@/utils/storage';
+import { withUserDefaults } from '@/utils/userDefaults';
 
 const usersRef = collection(db, 'users');
 
@@ -55,13 +56,7 @@ const usersRef = collection(db, 'users');
  * document simply won't have these two fields — default them here rather
  * than at every call site (§ "Out of scope" in the career-goals plan).
  */
-const withDefaults = (data: DocumentData, uid: string): User =>
-  ({
-    ...data,
-    uid,
-    careerGoals: data.careerGoals ?? [],
-    extraSkillsWanted: data.extraSkillsWanted ?? [],
-  }) as User;
+const withDefaults = (data: DocumentData, uid: string): User => withUserDefaults(data, uid);
 
 const toUser = (snapshot: QueryDocumentSnapshot<DocumentData>): User =>
   withDefaults(snapshot.data(), snapshot.id);

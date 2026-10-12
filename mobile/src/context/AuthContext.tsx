@@ -16,6 +16,7 @@ import { createContext, useCallback, useEffect, useMemo, useState, type ReactNod
 import { auth, db } from '@/firebase/config';
 import type { User } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
+import { withUserDefaults } from '@/utils/userDefaults';
 
 export type AuthContextValue = {
   firebaseUser: FirebaseUser | null;
@@ -29,8 +30,10 @@ export type AuthContextValue = {
 
 export const AuthContext = createContext<AuthContextValue | null>(null);
 
+// Same defaults as every other profile read, so old accounts without newer list
+// fields (e.g. `careerGoals`) never reach the app with `undefined` lists.
 const toProfile = (uid: string, data: Record<string, unknown>): User =>
-  ({ ...data, uid }) as User;
+  withUserDefaults(data, uid);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);

@@ -182,6 +182,14 @@ export default function BookingDetailScreen() {
           <BookingTimeline status={booking.status} />
         </Card>
 
+        {(booking.status === 'cancelled' || booking.status === 'declined') &&
+        booking.cancelReason?.trim() ? (
+          <Notice
+            tone="info"
+            message={`${booking.status === 'declined' ? 'Declined' : 'Cancelled'}: ${booking.cancelReason.trim()}`}
+          />
+        ) : null}
+
         <View style={styles.personBlock}>
           <Text style={styles.sectionLabel}>Teacher</Text>
           <PersonRow

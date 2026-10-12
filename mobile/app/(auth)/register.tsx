@@ -12,11 +12,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { BrandBackdrop } from '@/components/ui/BrandBackdrop';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Notice } from '@/components/ui/Notice';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
-import { colors, sizes, spacing, type } from '@/constants/theme';
+import { brand, colors, radius, shadow, sizes, spacing, type } from '@/constants/theme';
 import { register } from '@/services/authService';
 import { errorMessage } from '@/utils/authErrors';
 import {
@@ -26,6 +27,18 @@ import {
   validatePassword,
   type FieldError,
 } from '@/utils/validation';
+
+/** What SkillBridge is for, at a glance — one logo colour each. */
+const PILLS: {
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  color: string;
+  surface: string;
+}[] = [
+  { label: 'Learn', icon: 'school-outline', color: brand.blue, surface: brand.blueSurface },
+  { label: 'Teach', icon: 'easel-outline', color: brand.green, surface: brand.greenSurface },
+  { label: 'Grow', icon: 'trending-up', color: colors.accent, surface: colors.accentSurface },
+];
 
 export default function RegisterScreen() {
   const [name, setName] = useState('');
@@ -70,6 +83,7 @@ export default function RegisterScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+      <BrandBackdrop />
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
@@ -82,6 +96,15 @@ export default function RegisterScreen() {
             subtitle="Teach what you know, learn what you don't."
             showBack
           />
+
+          <View style={styles.pills}>
+            {PILLS.map((pill) => (
+              <View key={pill.label} style={[styles.pill, { backgroundColor: pill.surface }]}>
+                <Ionicons name={pill.icon} size={sizes.iconSm} color={pill.color} />
+                <Text style={[styles.pillText, { color: pill.color }]}>{pill.label}</Text>
+              </View>
+            ))}
+          </View>
 
           <View style={styles.form}>
             {formError ? <Notice tone="error" message={formError} /> : null}
@@ -171,6 +194,26 @@ const styles = StyleSheet.create({
   safe: {
     flex: 1,
     backgroundColor: colors.bg,
+    overflow: 'hidden',
+  },
+  pills: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    marginTop: -spacing.md,
+  },
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
+  },
+  pillText: {
+    ...type.label,
+    fontWeight: '600',
   },
   flex: {
     flex: 1,
@@ -182,7 +225,15 @@ const styles = StyleSheet.create({
   },
   form: {
     gap: spacing.lg,
-    paddingHorizontal: spacing.lg,
+    marginHorizontal: spacing.lg,
+    padding: spacing.xl,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: colors.border,
+    borderTopWidth: spacing.xs,
+    borderTopColor: colors.accent,
+    ...shadow.card,
   },
   terms: {
     flexDirection: 'row',

@@ -23,7 +23,7 @@ import {
   getBookingForSession,
   requestBooking,
 } from '@/services/bookingService';
-import { getSession, listUpcomingSessions } from '@/services/sessionService';
+import { cancelSession, getSession, listUpcomingSessions } from '@/services/sessionService';
 import { getUser } from '@/services/userService';
 import type { Booking, Session, User } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
@@ -47,6 +47,7 @@ export default function SessionDetailScreen() {
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(true);
   const [requesting, setRequesting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -114,6 +115,41 @@ export default function SessionDetailScreen() {
     seatsLeft > 0 &&
     (session.startAt?.toMillis?.() ?? 0) > Date.now();
 
+  const canCancel =
+    isTeacher &&
+    (session.status === 'open' || session.status === 'full') &&
+    (session.startAt?.toMillis?.() ?? 0) > Date.now();
+
+  function confirmCancel() {
+    if (!session || !profile || !canCancel) return;
+    const booked = Math.max(0, session.seatsTaken ?? 0);
+    Alert.alert(
+      'Cancel this session?',
+      booked > 0
+        ? `${booked === 1 ? 'The learner’s booking' : `All ${booked} learners’ bookings`} will be cancelled too. This cannot be undone.`
+        : 'Learners will no longer be able to book it. This cannot be undone.',
+      [
+        { text: 'Keep session', style: 'cancel' },
+        {
+          text: 'Cancel session',
+          style: 'destructive',
+          onPress: async () => {
+            setCancelling(true);
+            setError(null);
+            try {
+              await cancelSession(session.id, profile.uid);
+              await load();
+            } catch (cancelError) {
+              setError(errorMessage(cancelError));
+            } finally {
+              setCancelling(false);
+            }
+          },
+        },
+      ]
+    );
+  }
+
   async function submitRequest() {
     if (!session || !profile || !canRequest) return;
     setRequesting(true);
@@ -154,6 +190,16 @@ export default function SessionDetailScreen() {
       <ScreenHeader title="Session details" showBack />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {error ? <Notice tone="error" message={error} /> : null}
+        {session.status === 'cancelled' ? (
+          <Notice
+            tone="error"
+            message={
+              isTeacher
+                ? 'You cancelled this session. Any learner bookings were cancelled with it.'
+                : 'The teacher cancelled this session, so it can no longer be booked.'
+            }
+          />
+        ) : null}
 
         <Card
           onPress={() => router.push(`/user/${session.teacherId}`)}
@@ -276,7 +322,18 @@ export default function SessionDetailScreen() {
             </View>
           </Card>
         ) : isTeacher ? (
-          <Notice tone="info" message="This is your own session. Manage requests from the Teaching tab." />
+          <View style={styles.requestBlock}>
+            <Notice tone="info" message="This is your own session. Manage requests from the Teaching tab." />
+            {canCancel ? (
+              <Button
+                label="Cancel session"
+                variant="danger"
+                icon="close-circle-outline"
+                loading={cancelling}
+                onPress={confirmCancel}
+              />
+            ) : null}
+          </View>
         ) : profile.role === 'teacher' ? (
           <Notice
             tone="info"
@@ -294,7 +351,13 @@ export default function SessionDetailScreen() {
               helper={`${note.length}/300 characters`}
             />
             <Button
-              label={seatsLeft === 0 ? 'Session full' : 'Request booking'}
+              label={
+                session.status === 'cancelled'
+                  ? 'Session cancelled'
+                  : seatsLeft === 0
+                    ? 'Session full'
+                    : 'Request booking'
+              }
               icon="calendar-outline"
               onPress={confirmRequest}
               loading={requesting}

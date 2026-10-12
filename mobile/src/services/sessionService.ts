@@ -17,7 +17,6 @@ import {
   query,
   runTransaction,
   serverTimestamp,
-  updateDoc,
   where,
   writeBatch,
   type DocumentData,
@@ -27,6 +26,8 @@ import {
 import { skillByTag } from '@/constants/skills';
 import { db } from '@/firebase/config';
 import type {
+  Booking,
+  BookingStatus,
   Category,
   Level,
   Session,
@@ -363,13 +364,78 @@ export async function deleteSession(sessionId: string, teacherId: string): Promi
   });
 }
 
-export async function cancelSession(sessionId: string, teacherId: string): Promise<void> {
-  const existing = await getSession(sessionId);
-  if (!existing) throw new Error('Session no longer exists.');
-  if (existing.teacherId !== teacherId) throw new Error('Only the host can cancel this session.');
+/** Shown on a learner's booking when the teacher cancels without giving a reason. */
+export const SESSION_CANCELLED_REASON = 'The teacher cancelled this session.';
 
-  await updateDoc(doc(db, 'sessions', sessionId), {
-    status: 'cancelled',
-    updatedAt: serverTimestamp(),
-  });
+const ACTIVE_BOOKING_STATUSES: BookingStatus[] = ['pending', 'confirmed'];
+
+/**
+ * Teacher cancels a session that may already have bookings. Every pending or
+ * confirmed booking is cancelled in the same transaction and the seats are
+ * freed, so no learner is left holding a booking for a session that will not
+ * happen. Resolves to the number of bookings cancelled.
+ */
+export async function cancelSession(
+  sessionId: string,
+  teacherId: string,
+  reason = ''
+): Promise<number> {
+  const cancelReason = reason.trim() || SESSION_CANCELLED_REASON;
+
+  // Transactions cannot run queries, so the bookings are found first and each
+  // one is re-read inside the transaction. Pending and confirmed bookings each
+  // hold a seat, so `seatsTaken` above the active count means a booking landed
+  // after the lookup: look again once. The second pass proceeds regardless, so
+  // an old seat-count drift can never block a cancellation.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const lookup = await getDocs(
+      query(collection(db, 'bookings'), where('sessionId', '==', sessionId))
+    );
+    const bookingIds = lookup.docs.map((row) => row.id);
+    const verifySeats = attempt === 0;
+
+    const cancelled = await runTransaction(db, async (tx) => {
+      const sessionRef = doc(db, 'sessions', sessionId);
+      const sessionSnap = await tx.get(sessionRef);
+      if (!sessionSnap.exists()) throw new Error('This session no longer exists.');
+
+      const session = sessionSnap.data() as Session;
+      if (session.teacherId !== teacherId) {
+        throw new Error('Only the teacher who created this session can cancel it.');
+      }
+      if (session.status === 'cancelled') throw new Error('This session is already cancelled.');
+      if (session.status === 'completed') throw new Error('A completed session cannot be cancelled.');
+      if ((session.startAt?.toMillis?.() ?? 0) <= Date.now()) {
+        throw new Error('This session has already started, so it can no longer be cancelled.');
+      }
+
+      const bookingSnaps = await Promise.all(
+        bookingIds.map((id) => tx.get(doc(db, 'bookings', id)))
+      );
+      const active = bookingSnaps.filter(
+        (snap) =>
+          snap.exists() &&
+          ACTIVE_BOOKING_STATUSES.includes((snap.data() as Booking).status)
+      );
+      if (verifySeats && (session.seatsTaken ?? 0) > active.length) return null;
+
+      for (const snap of active) {
+        tx.update(snap.ref, {
+          status: 'cancelled' satisfies BookingStatus,
+          cancelReason,
+          updatedAt: serverTimestamp(),
+        });
+      }
+      tx.update(sessionRef, {
+        status: 'cancelled' satisfies SessionStatus,
+        seatsTaken: 0,
+        updatedAt: serverTimestamp(),
+      });
+      return active.length;
+    });
+
+    if (cancelled !== null) return cancelled;
+  }
+
+  throw new Error('Bookings changed while cancelling this session. Please try again.');
 }

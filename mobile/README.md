@@ -8,14 +8,21 @@ only what you need to run the project.
 
 ## Run it
 
+**Expo Go does not work for this app.** In-app video (LiveKit) needs native code,
+so you develop on the SkillBridge **development build** APK instead. Install it once
+from expo.dev (`skillbridge-team` → `skillbridge` → Builds → latest *development*).
+Full step-by-step setup, branching and release flow: [DEV_GUIDE.md](DEV_GUIDE.md).
+
 ```bash
 npm install
-cp .env.example .env        # then paste the six values from the group chat
-npx expo start              # scan the QR code with Expo Go
+cp .env.example .env              # then paste the six values from the group chat
+npx expo start --dev-client       # open the development build on your phone
 ```
 
-`npx expo start -c` clears the Metro cache — use it whenever something looks stale,
-and always after editing `.env` (env values are inlined at bundle time).
+Run every command from `mobile/` — outside it, `npx expo` downloads an unrelated Expo version.
+
+`npx expo start --dev-client -c` clears the Metro cache — use it whenever something
+looks stale, and always after editing `.env` (env values are inlined at bundle time).
 
 ## Environment variables
 
@@ -39,7 +46,24 @@ Gemini key never goes here (§11.1 of the plan).
 ```bash
 npx tsc --noEmit    # type-check everything
 npx expo lint       # must be clean, not just error-free
+npx jest            # every test must pass
 ```
+
+GitHub Actions runs the same checks on every PR, and a merge to `main` ships the app
+automatically (an OTA update, or a new preview build when native code changed).
+
+## Backend (deployed by hand)
+
+Nothing here deploys from CI. Run from `mobile/` on an up-to-date `main`:
+
+| What | File | Deploy |
+|---|---|---|
+| Cloud Functions (LiveKit meeting tokens) | `functions/` | `npx firebase-tools deploy --only functions --project concise-kayak-468613-m9` |
+| Firestore composite indexes | `firestore.indexes.json` | `npx firebase-tools deploy --only firestore:indexes --project concise-kayak-468613-m9` |
+
+Firestore and Storage **security rules are managed in the Firebase console** (signed-in
+users only), not in this repo — `firebase.json` deliberately has no `rules` entry so a
+deploy can never overwrite them. LiveKit secrets setup: [LIVEKIT_SETUP.md](LIVEKIT_SETUP.md).
 
 ## Layout
 
@@ -54,6 +78,8 @@ src/
   constants/    theme.ts (§13), skills.ts (§6.1), config.ts
   types/        every Firestore document shape (§7)
   utils/        authErrors, validation, date
+functions/      Firebase Cloud Functions (LiveKit token)
+_tests_/        Jest tests
 ```
 
 ## House rules

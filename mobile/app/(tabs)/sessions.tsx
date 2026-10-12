@@ -27,7 +27,12 @@ import {
   requestBooking,
   subscribeToMyBookings,
 } from '@/services/bookingService';
-import { deleteSession, getSessionsByTeacher, listUpcomingSessions } from '@/services/sessionService';
+import {
+  cancelSession,
+  deleteSession,
+  getSessionsByTeacher,
+  listUpcomingSessions,
+} from '@/services/sessionService';
 import type { Booking, Session } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
 import { SESSION_MODE_LABEL, formatSessionTime } from '@/utils/sessionFormat';
@@ -241,6 +246,42 @@ export default function SessionsScreen() {
               await loadSessions();
             } catch (actionError) {
               Alert.alert('Could not delete session', errorMessage(actionError));
+            } finally {
+              setActingId(null);
+            }
+          },
+        },
+      ]
+    );
+  }
+
+  function confirmCancelSession(session: Session) {
+    if (!profile) return;
+    const booked = Math.max(0, session.seatsTaken ?? 0);
+    Alert.alert(
+      'Cancel this session?',
+      booked > 0
+        ? `"${session.title}" will be cancelled and ${booked === 1 ? 'the learner’s booking' : `all ${booked} learners’ bookings`} will be cancelled too. This cannot be undone.`
+        : `"${session.title}" will be cancelled. This cannot be undone.`,
+      [
+        { text: 'Keep session', style: 'cancel' },
+        {
+          text: 'Cancel session',
+          style: 'destructive',
+          onPress: async () => {
+            setActingId(session.id);
+            setSessionsError(null);
+            try {
+              const count = await cancelSession(session.id, profile.uid);
+              await loadSessions();
+              Alert.alert(
+                'Session cancelled',
+                count > 0
+                  ? `${count === 1 ? 'The learner has' : `${count} learners have`} been told on their booking.`
+                  : 'The session is no longer open for booking.'
+              );
+            } catch (actionError) {
+              Alert.alert('Could not cancel session', errorMessage(actionError));
             } finally {
               setActingId(null);
             }
@@ -603,10 +644,19 @@ export default function SessionsScreen() {
                             }
                           />
                           {hasBooking ? (
-                            <Notice
-                              tone="info"
-                              message="Editing and deletion are locked because a learner has booked this session."
-                            />
+                            <>
+                              <Notice
+                                tone="info"
+                                message="A learner has booked this session, so it can no longer be edited or deleted. You can still cancel it."
+                              />
+                              <Button
+                                label="Cancel session"
+                                variant="danger"
+                                icon="close-circle-outline"
+                                loading={actingId === session.id}
+                                onPress={() => confirmCancelSession(session)}
+                              />
+                            </>
                           ) : (
                             <View style={styles.offerActions}>
                               <Button

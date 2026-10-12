@@ -25,6 +25,7 @@
     },
     "android": {
       "package": "com.sliit.skillbridge.app",
+      "googleServicesFile": "./google-services.json",
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
@@ -70,7 +71,14 @@
       "@react-native-community/datetimepicker",
       "expo-dev-client",
       "@livekit/react-native-expo-plugin",
-      "@config-plugins/react-native-webrtc"
+      "@config-plugins/react-native-webrtc",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#0B7A6D"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

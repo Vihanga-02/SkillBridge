@@ -65,6 +65,43 @@ describe('scorePeer', () => {
   });
 });
 
+describe('older or incomplete profiles never crash ranking', () => {
+  // Reproduces the Discover crash: an account created before career goals
+  // existed has wanted skills but no `careerGoals` field at all.
+  const legacyViewer = { skillTagsWanted: ['python'] } as unknown as Viewer;
+
+  it('scores a viewer with no careerGoals field', () => {
+    expect(() => scorePeer(legacyViewer, peer('a', [offered('python')]))).not.toThrow();
+    expect(scorePeer(legacyViewer, peer('a', [offered('python')])).matchedTags).toEqual(['python']);
+  });
+
+  it('ranks a page for a viewer with no careerGoals field', () => {
+    const items = [peer('none', [offered('java')]), peer('match', [offered('python')])];
+    expect(uids(rankInBatches(items, legacyViewer, 12))).toEqual(['match', 'none']);
+  });
+
+  it('handles a viewer with no wanted skills field', () => {
+    const viewerWithout = {} as unknown as Viewer;
+    expect(scorePeer(viewerWithout, peer('a', [offered('python')])).score).toBe(0);
+  });
+
+  it('handles peers with missing skills, null entries and missing ratings', () => {
+    const broken = [
+      { uid: 'no-skills' } as unknown as Peer,
+      { uid: 'null-skill', skillsOffered: [null, offered('figma')] } as unknown as Peer,
+      peer('good', [offered('python')], 4, 2),
+    ];
+    const ranked = rankInBatches(broken, viewer, 12);
+    expect(uids(ranked)).toEqual(['good', 'null-skill', 'no-skills']);
+    expect(ranked[1].match.matchedTags).toEqual(['figma']);
+  });
+
+  it('never loops forever on a bad batch size', () => {
+    const items = [peer('a', [offered('python')]), peer('b', [])];
+    expect(uids(rankInBatches(items, viewer, 0))).toEqual(['a', 'b']);
+  });
+});
+
 describe('rankInBatches', () => {
   it('puts more matching skills first', () => {
     const items = [

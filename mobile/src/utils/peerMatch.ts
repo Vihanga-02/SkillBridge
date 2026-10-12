@@ -19,16 +19,22 @@ const WEIGHT = { match: 10, goal: 2, verified: 1 } as const;
 
 const NO_MATCH: PeerMatch = { score: 0, matchedTags: [], matchedLabels: [] };
 
+/** Firestore field that should be a list; older or hand-edited docs may lack it. */
+const list = <T>(value: T[] | null | undefined): T[] => (Array.isArray(value) ? value : []);
+
 /**
  * `skillTagsWanted` is already the union of the viewer's career-goal skills and
  * their extra picks; a match that serves one of their goals scores a little more.
+ *
+ * Every field is read defensively: accounts created before career goals existed
+ * have no `careerGoals` at all, and ranking must never crash Discovery.
  */
 export function scorePeer(viewer: Viewer, peer: Peer): PeerMatch {
-  const wanted = new Set<string>(viewer.skillTagsWanted);
+  const wanted = new Set<string>(list(viewer.skillTagsWanted));
   if (wanted.size === 0) return NO_MATCH;
 
-  const goalTags = new Set<string>(viewer.careerGoals.flatMap((goal) => goal.skillTags));
-  const matched = peer.skillsOffered.filter((skill) => wanted.has(skill.skill));
+  const goalTags = new Set<string>(list(viewer.careerGoals).flatMap((goal) => list(goal?.skillTags)));
+  const matched = list(peer.skillsOffered).filter((skill) => !!skill && wanted.has(skill.skill));
   if (matched.length === 0) return NO_MATCH;
 
   const score = matched.reduce(
@@ -60,17 +66,19 @@ export function rankInBatches<T extends Peer>(
   batchSize: number
 ): RankedPeer<T>[] {
   const ranked: RankedPeer<T>[] = [];
+  const size = Math.max(1, Math.floor(batchSize) || 1);
+  const num = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
 
-  for (let start = 0; start < items.length; start += batchSize) {
+  for (let start = 0; start < items.length; start += size) {
     const batch = items
-      .slice(start, start + batchSize)
+      .slice(start, start + size)
       .map((user, index) => ({ user, match: scorePeer(viewer, user), index }));
 
     batch.sort(
       (a, b) =>
         b.match.score - a.match.score ||
-        b.user.ratingAvg - a.user.ratingAvg ||
-        b.user.ratingCount - a.user.ratingCount ||
+        num(b.user.ratingAvg) - num(a.user.ratingAvg) ||
+        num(b.user.ratingCount) - num(a.user.ratingCount) ||
         a.index - b.index
     );
 

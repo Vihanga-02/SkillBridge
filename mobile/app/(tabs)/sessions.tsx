@@ -33,7 +33,7 @@ import {
   getSessionsByTeacher,
   listUpcomingSessions,
 } from '@/services/sessionService';
-import type { Booking, Session } from '@/types';
+import type { Booking, Session, SessionMode } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
 import { SESSION_MODE_LABEL, formatSessionTime } from '@/utils/sessionFormat';
 
@@ -42,6 +42,17 @@ type BrowseScope = 'all' | 'forYou';
 type BookingFilter = 'upcoming' | 'past' | 'cancelled';
 type TeachingView = 'requests' | 'sessions' | 'schedule' | 'history';
 type BrowseDateFilter = 'all' | 'today' | 'custom';
+type BrowseModeFilter = 'all' | SessionMode;
+
+const MODE_FILTERS: {
+  value: BrowseModeFilter;
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+}[] = [
+  { value: 'all', label: 'Any mode', icon: 'apps-outline' },
+  { value: 'online', label: 'Online', icon: 'videocam-outline' },
+  { value: 'in_person', label: 'In person', icon: 'location-outline' },
+];
 
 export default function SessionsScreen() {
   const { profile } = useAuth();
@@ -57,6 +68,7 @@ export default function SessionsScreen() {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState<Category | null>(null);
   const [dateFilter, setDateFilter] = useState<BrowseDateFilter>('all');
+  const [modeFilter, setModeFilter] = useState<BrowseModeFilter>('all');
   const [customDate, setCustomDate] = useState(() => startOfDay(new Date()));
   const [iosDatePickerOpen, setIosDatePickerOpen] = useState(false);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -170,10 +182,11 @@ export default function SessionsScreen() {
         (browseScope === 'all' || wantedSkills.has(session.skillTag)) &&
         (!category || session.category === category) &&
         (!term || searchable.includes(term)) &&
-        (!selectedDate || (!!startDate && isSameDay(startDate, selectedDate)))
+        (!selectedDate || (!!startDate && isSameDay(startDate, selectedDate))) &&
+        (modeFilter === 'all' || session.mode === modeFilter)
       );
     });
-  }, [browseScope, category, customDate, dateFilter, profile?.skillTagsWanted, search, sessions]);
+  }, [browseScope, category, customDate, dateFilter, modeFilter, profile?.skillTagsWanted, search, sessions]);
 
   function onCustomDateChange(event: DateTimePickerEvent, selected?: Date) {
     if (event.type === 'set' && selected) {
@@ -451,6 +464,24 @@ export default function SessionsScreen() {
                 selected={dateFilter === 'custom'}
                 onPress={openCustomDatePicker}
               />
+            </ScrollView>
+          </View>
+          <View style={styles.dateFilterSection}>
+            <Text style={styles.filterLabel}>Mode</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.categoryRow}>
+              {MODE_FILTERS.map((option) => (
+                <Chip
+                  key={option.value}
+                  size="sm"
+                  icon={option.icon}
+                  label={option.label}
+                  selected={modeFilter === option.value}
+                  onPress={() => setModeFilter(option.value)}
+                />
+              ))}
             </ScrollView>
           </View>
           {visibleSessions.length === 0 ? (

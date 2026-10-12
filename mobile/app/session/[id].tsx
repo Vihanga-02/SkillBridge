@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BookingStatusBadge } from '@/components/session/BookingStatusBadge';
@@ -14,19 +14,27 @@ import { LoadingState } from '@/components/ui/LoadingState';
 import { Notice } from '@/components/ui/Notice';
 import { RatingStars } from '@/components/ui/RatingStars';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
+import { ShareButton } from '@/components/ui/ShareButton';
 import { SkillChip } from '@/components/ui/SkillChip';
 import { skillLabel } from '@/constants/skills';
-import { colors, sizes, spacing, type } from '@/constants/theme';
+import { colors, radius, sizes, spacing, type } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import {
   BookingScheduleConflictError,
   getBookingForSession,
   requestBooking,
+  subscribeToSessionBookings,
 } from '@/services/bookingService';
-import { cancelSession, getSession, listUpcomingSessions } from '@/services/sessionService';
+import {
+  cancelSession,
+  getSession,
+  listUpcomingSessions,
+  subscribeToSession,
+} from '@/services/sessionService';
 import { getUser } from '@/services/userService';
 import type { Booking, Session, User } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
+import { sessionShareText, shareText } from '@/utils/share';
 import {
   SESSION_MODE_LABEL,
   SESSION_TYPE_LABEL,
@@ -35,6 +43,9 @@ import {
   formatSessionDate,
   formatSessionTime,
 } from '@/utils/sessionFormat';
+
+/** Attendee avatars shown before collapsing the rest into "+N". */
+const MAX_ATTENDEE_AVATARS = 8;
 
 export default function SessionDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -48,7 +59,9 @@ export default function SessionDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [requesting, setRequesting] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [attendees, setAttendees] = useState<Booking[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const confirmedCount = attendees.filter((row) => row.status === 'confirmed').length;
 
   const load = useCallback(async () => {
     if (!id || !profile) return;
@@ -80,6 +93,24 @@ export default function SessionDetailScreen() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Live while open: seats and status, plus who has booked. The viewer's own
+  // booking comes from the same stream, so an approval shows up without a reload.
+  const uid = profile?.uid;
+  useEffect(() => {
+    if (!id) return;
+    return subscribeToSession(id, (live) => {
+      if (live) setSession(live);
+    });
+  }, [id]);
+
+  useEffect(() => {
+    if (!id || !uid) return;
+    return subscribeToSessionBookings(id, (rows) => {
+      setAttendees(rows.filter((row) => row.status === 'pending' || row.status === 'confirmed'));
+      setBooking(rows.find((row) => row.learnerId === uid) ?? null);
+    });
+  }, [id, uid]);
 
   if (!profile || loading) {
     return <LoadingState fullScreen label="Loading session…" />;
@@ -187,7 +218,16 @@ export default function SessionDetailScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScreenHeader title="Session details" showBack />
+      <ScreenHeader
+        title="Session details"
+        showBack
+        action={
+          <ShareButton
+            accessibilityLabel="Share this session"
+            onPress={() => void shareText(sessionShareText(session))}
+          />
+        }
+      />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {error ? <Notice tone="error" message={error} /> : null}
         {session.status === 'cancelled' ? (
@@ -222,6 +262,24 @@ export default function SessionDetailScreen() {
                   <Ionicons name="location-outline" size={sizes.iconSm} color={colors.inkMuted} />
                   <Text style={styles.inlineText}>{teacher.location}</Text>
                 </View>
+              ) : null}
+              {(teacher?.credentialCount ?? 0) > 0 ? (
+                <Pressable
+                  onPress={() =>
+                    router.push({
+                      pathname: '/user/[id]',
+                      params: { id: session.teacherId, focus: 'credentials' },
+                    })
+                  }
+                  hitSlop={spacing.sm}
+                  accessibilityRole="link"
+                  accessibilityLabel={`View ${teacher?.credentialCount} credentials`}
+                  style={styles.credentialLink}>
+                  <Ionicons name="document-text-outline" size={sizes.iconSm} color={colors.accent} />
+                  <Text style={styles.credentialText}>
+                    {teacher?.credentialCount} {teacher?.credentialCount === 1 ? 'credential' : 'credentials'} · View
+                  </Text>
+                </Pressable>
               ) : null}
             </View>
             <Ionicons name="chevron-forward" size={sizes.iconMd} color={colors.inkFaint} />
@@ -271,6 +329,36 @@ export default function SessionDetailScreen() {
             />
           </View>
         </Card>
+
+        {attendees.length > 0 ? (
+          <Card>
+            <View style={styles.attendees}>
+              <Text style={styles.sectionTitle}>Who&apos;s going</Text>
+              <Text style={styles.helper}>
+                {confirmedCount} confirmed
+                {attendees.length - confirmedCount > 0
+                  ? ` · ${attendees.length - confirmedCount} waiting for approval`
+                  : ''}
+              </Text>
+              <View
+                style={styles.avatarRow}
+                accessibilityLabel={`Attending: ${attendees.map((row) => row.learnerName).join(', ')}`}>
+                {attendees.slice(0, MAX_ATTENDEE_AVATARS).map((row) => (
+                  <View key={row.id} style={styles.attendeeAvatar}>
+                    <Avatar name={row.learnerName} uri={row.learnerAvatarUrl || undefined} size="sm" />
+                  </View>
+                ))}
+                {attendees.length > MAX_ATTENDEE_AVATARS ? (
+                  <View style={[styles.attendeeAvatar, styles.moreAttendees]}>
+                    <Text style={styles.moreAttendeesText}>
+                      +{attendees.length - MAX_ATTENDEE_AVATARS}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+            </View>
+          </Card>
+        ) : null}
 
         {session.mode === 'online' &&
         (isTeacher || activeBooking?.status === 'confirmed') ? (
@@ -419,4 +507,28 @@ const styles = StyleSheet.create({
   sectionTitle: { ...type.h2, color: colors.ink },
   helper: { ...type.body, color: colors.inkMuted },
   requestBlock: { gap: spacing.lg },
+  credentialLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    alignSelf: 'flex-start',
+    marginTop: spacing.xs,
+  },
+  credentialText: { ...type.label, color: colors.accent },
+  attendees: { gap: spacing.sm },
+  avatarRow: { flexDirection: 'row', flexWrap: 'wrap', paddingTop: spacing.xs },
+  attendeeAvatar: {
+    marginRight: -spacing.sm,
+    borderRadius: radius.full,
+    borderWidth: 2,
+    borderColor: colors.surface,
+  },
+  moreAttendees: {
+    width: sizes.avatarSm + 4,
+    height: sizes.avatarSm + 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceAlt,
+  },
+  moreAttendeesText: { ...type.caption, fontWeight: '700', color: colors.inkMuted },
 });

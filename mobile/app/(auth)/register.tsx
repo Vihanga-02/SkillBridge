@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Link } from 'expo-router';
+import { Link, type Href } from 'expo-router';
 import { useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -175,6 +175,10 @@ export default function RegisterScreen() {
               </Text>
             </Pressable>
 
+            <Link href={'/help' as Href} style={[styles.link, styles.termsLink]}>
+              Read the community guidelines & privacy
+            </Link>
+
             <Button label="Create account" onPress={onSubmit} loading={submitting} />
           </View>
 
@@ -245,6 +249,10 @@ const styles = StyleSheet.create({
     ...type.caption,
     color: colors.inkMuted,
     flex: 1,
+  },
+  termsLink: {
+    marginTop: -spacing.sm,
+    paddingLeft: sizes.iconLg + spacing.sm,
   },
   footer: {
     flexDirection: 'row',

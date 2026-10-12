@@ -11,6 +11,8 @@ import { Card } from '@/components/ui/Card';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { Notice } from '@/components/ui/Notice';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
+import { ShareButton } from '@/components/ui/ShareButton';
+import { lessonShareText, shareText } from '@/utils/share';
 import { colors, radius, sizes, spacing, type } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { enrollInLesson, getEnrollment, getLesson } from '@/services/lessonService';
@@ -90,7 +92,18 @@ export default function LessonDetailsScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <ScreenHeader title="Course Details" showBack />
+        <ScreenHeader
+          title="Course Details"
+          showBack
+          action={
+            lesson ? (
+              <ShareButton
+                accessibilityLabel="Share this lesson"
+                onPress={() => void shareText(lessonShareText(lesson))}
+              />
+            ) : undefined
+          }
+        />
         {error ? <Notice tone="error" message={error} /> : null}
 
         {lesson ? (

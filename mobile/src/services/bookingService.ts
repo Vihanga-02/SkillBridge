@@ -111,6 +111,25 @@ export function subscribeToMyBookings(
   );
 }
 
+/** Every booking for one session (any status) — attendee lists and busy checks. */
+export async function getBookingsForSession(sessionId: string): Promise<Booking[]> {
+  const snapshot = await getDocs(query(bookingsCol, where('sessionId', '==', sessionId)));
+  return snapshot.docs.map(toBooking);
+}
+
+/** Live version of `getBookingsForSession`, so the attendee list updates as people book. */
+export function subscribeToSessionBookings(
+  sessionId: string,
+  onNext: (bookings: Booking[]) => void,
+  onError?: (error: Error) => void
+): Unsubscribe {
+  return onSnapshot(
+    query(bookingsCol, where('sessionId', '==', sessionId)),
+    (snapshot) => onNext(snapshot.docs.map(toBooking)),
+    (error) => onError?.(error)
+  );
+}
+
 /**
  * Learner claims a seat. Status starts as `pending` until the teacher approves.
  * If this was the last seat, the session flips to `full` in the same write.
@@ -293,6 +312,7 @@ export async function cancelBooking(bookingId: string, byUid: string): Promise<v
 
     tx.update(bookingRef, {
       status: 'cancelled' satisfies BookingStatus,
+      cancelledBy: byUid,
       updatedAt: serverTimestamp(),
     });
 

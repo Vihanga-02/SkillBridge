@@ -13,6 +13,7 @@ import {
   getDoc,
   getDocs,
   limit,
+  onSnapshot,
   orderBy,
   query,
   runTransaction,
@@ -21,6 +22,7 @@ import {
   writeBatch,
   type DocumentData,
   type QueryDocumentSnapshot,
+  type Unsubscribe,
 } from 'firebase/firestore';
 
 import { skillByTag } from '@/constants/skills';
@@ -101,6 +103,23 @@ async function assertTeacherScheduleAvailable(
 export async function getSession(sessionId: string): Promise<Session | null> {
   const snapshot = await getDoc(doc(db, 'sessions', sessionId));
   return snapshot.exists() ? ({ ...snapshot.data(), id: snapshot.id } as Session) : null;
+}
+
+/**
+ * Live session document, so seats and status update on screen as learners book
+ * or the teacher cancels — no manual reload. Calls `onNext(null)` if deleted.
+ */
+export function subscribeToSession(
+  sessionId: string,
+  onNext: (session: Session | null) => void,
+  onError?: (error: Error) => void
+): Unsubscribe {
+  return onSnapshot(
+    doc(db, 'sessions', sessionId),
+    (snapshot) =>
+      onNext(snapshot.exists() ? ({ ...snapshot.data(), id: snapshot.id } as Session) : null),
+    (error) => onError?.(error)
+  );
 }
 
 export async function getEditableSession(sessionId: string): Promise<Session | null> {
@@ -423,6 +442,7 @@ export async function cancelSession(
         tx.update(snap.ref, {
           status: 'cancelled' satisfies BookingStatus,
           cancelReason,
+          cancelledBy: teacherId,
           updatedAt: serverTimestamp(),
         });
       }

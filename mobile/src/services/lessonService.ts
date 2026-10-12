@@ -20,10 +20,12 @@ import { careerGoalByTag, type CareerGoalTag } from '@/constants/careerGoals';
 import { FILE_LIMITS } from '@/constants/config';
 import { skillByTag } from '@/constants/skills';
 import { auth, db } from '@/firebase/config';
+import { createLessonAchievementPost } from '@/services/postService';
 import type { Lesson, LessonContent, LessonEnrollment, QuizQuestion, User } from '@/types';
 import { lessonCompletion, questionId, validateQuiz } from '@/utils/lessonProgress';
 import { deleteFile, sanitizeStorageName, uploadFile } from '@/utils/storage';
 import { nonNegativeCount } from '@/utils/counts';
+import { localDay, nextStreak } from '@/utils/streak';
 
 export type LocalPdf = {
   uri: string;
@@ -740,7 +742,10 @@ async function updateLearningProgress(user: User, lessonId: string, action: Prog
   const progressRef = doc(db, 'lessonProgress', enrollmentIdFor(user.uid, lessonId));
   const lessonRef = doc(db, 'lessons', lessonId);
   const userRef = doc(db, 'users', user.uid);
-  return runTransaction(db, async transaction => {
+  // Set on each transaction attempt, so only the committed attempt counts.
+  let newlyCompleted = false;
+  const updated = await runTransaction(db, async transaction => {
+    newlyCompleted = false;
     const [enrollmentSnapshot, lessonSnapshot, profile] = await Promise.all([
       transaction.get(enrollmentRef), transaction.get(lessonRef), transaction.get(userRef),
     ]);
@@ -802,18 +807,46 @@ async function updateLearningProgress(user: User, lessonId: string, action: Prog
       minutesSpent: lesson.contents.filter(item => completedIds.has(item.id)).length * 5,
       completedAt, updatedAt: serverTimestamp(),
     }, { merge: true });
+    const userUpdate: Record<string, unknown> = {};
     if (delta !== 0) {
       transaction.update(lessonRef, {
         completeCount: Math.max(0, nonNegativeCount(lessonSnapshot.data().completeCount) + delta),
       });
-      transaction.update(userRef, {
-        'stats.lessonsCompleted': Math.max(0, nonNegativeCount(profile.data()?.stats?.lessonsCompleted) + delta),
-      });
+      userUpdate['stats.lessonsCompleted'] =
+        Math.max(0, nonNegativeCount(profile.data()?.stats?.lessonsCompleted) + delta);
     }
+    // Learning streak (§5.2): any real progress today keeps it going. Un-ticking
+    // a material, retrying a quiz or a background refresh is not progress.
+    const madeProgress =
+      (action.type === 'toggle' && completedIds.has(action.contentId)) ||
+      action.type === 'answer' ||
+      action.type === 'complete';
+    if (madeProgress) {
+      const today = localDay();
+      const { streak, lastActiveDate } = profile.data() ?? {};
+      const next = nextStreak(streak, lastActiveDate, today);
+      if (lastActiveDate !== today || next !== streak) {
+        userUpdate.streak = next;
+        userUpdate.lastActiveDate = today;
+      }
+    }
+    if (Object.keys(userUpdate).length > 0) transaction.update(userRef, userUpdate);
+    newlyCompleted = delta === 1;
     return { ...enrollment, completedContentIds, quizAnswers, contentCount: lesson.contents.length,
       progress: result.progress, completed: result.completed,
       completedAt: result.completed ? enrollment.completedAt : null };
   });
+
+  // §6 integration 11: completing a lesson shares an achievement on the
+  // community feed. Best effort — the lesson is already complete either way.
+  if (newlyCompleted) {
+    try {
+      await createLessonAchievementPost(user, { lessonId, lessonName: updated.lessonName });
+    } catch (error) {
+      console.warn('Could not post the lesson achievement:', error);
+    }
+  }
+  return updated;
 }
 
 export const toggleLessonContentDone = (user: User, lesson: Lesson, contentId: string) =>

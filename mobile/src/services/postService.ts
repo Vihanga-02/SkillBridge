@@ -187,6 +187,44 @@ export async function createPost(author: PostAuthor, input: CreatePostInput): Pr
 }
 
 /**
+ * Shares a completed lesson on the community feed (§6 integration 11). The post
+ * id is fixed per learner + lesson, so completing a lesson again — after a
+ * material was un-ticked, say — never posts a duplicate. Resolves to whether a
+ * post was created.
+ */
+export async function createLessonAchievementPost(
+  author: PostAuthor,
+  lesson: { lessonId: string; lessonName: string }
+): Promise<boolean> {
+  const name = lesson.lessonName.trim() || 'a lesson';
+  const { text } = validatePostInput({
+    type: 'achievement',
+    text: `Completed the lesson “${name}” on SkillBridge! 🎉`,
+  });
+  const postRef = doc(db, 'posts', `achievement_${author.uid}_${lesson.lessonId}`);
+
+  return runTransaction(db, async (transaction) => {
+    if ((await transaction.get(postRef)).exists()) return false;
+    transaction.set(postRef, {
+      id: postRef.id,
+      authorId: author.uid,
+      authorName: author.name,
+      authorAvatarUrl: author.avatarUrl ?? '',
+      type: 'achievement' satisfies PostType,
+      text,
+      likedBy: [],
+      likeCount: 0,
+      commentCount: 0,
+      moderation: 'skipped',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    transaction.set(communityStatsRef(author.uid), contributionCreatedFields('post', author), { merge: true });
+    return true;
+  });
+}
+
+/**
  * Gets one feed page. A temporary client-sort fallback keeps the type filter
  * usable until the `posts.type + createdAt` index has finished building.
  */

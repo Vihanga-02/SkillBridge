@@ -378,6 +378,59 @@ it('zero MCQs require only the current materials', async () => {
   await toggleLessonContentDone(user, lesson, 'video');
   expect(await toggleLessonContentDone(user, lesson, 'pdf')).toMatchObject({ completed: true, progress: 100 });
 });
+describe('learning streak and achievement post', () => {
+  const day = (offset = 0) => {
+    const date = new Date();
+    date.setDate(date.getDate() + offset);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  };
+  const posts = () => [...records.keys()].filter((path) => path.startsWith('posts/'));
+
+  it('completing a lesson starts the streak and posts one achievement', async () => {
+    const user = { ...(await startLearning('learner', 'learner', 0)), name: 'Kasun' } as User;
+    await toggleLessonContentDone(user, lesson, 'video');
+    expect(records.get('users/learner')).toMatchObject({ streak: 1, lastActiveDate: day() });
+    expect(posts()).toEqual([]);
+
+    expect(await toggleLessonContentDone(user, lesson, 'pdf')).toMatchObject({ completed: true });
+    expect(posts()).toEqual(['posts/achievement_learner_lesson']);
+    expect(records.get('posts/achievement_learner_lesson')).toMatchObject({
+      authorId: 'learner', authorName: 'Kasun', type: 'achievement', likeCount: 0, commentCount: 0,
+    });
+    expect(records.get('posts/achievement_learner_lesson')?.text).toContain(
+      `“${records.get('lessons/lesson')?.lessonName}”`
+    );
+  });
+
+  it('completing the same lesson again never posts a duplicate', async () => {
+    const user = await startLearning('learner', 'learner', 0);
+    await toggleLessonContentDone(user, lesson, 'video');
+    await toggleLessonContentDone(user, lesson, 'pdf');
+    await toggleLessonContentDone(user, lesson, 'pdf');
+    expect(await toggleLessonContentDone(user, lesson, 'pdf')).toMatchObject({ completed: true });
+    expect(posts()).toEqual(['posts/achievement_learner_lesson']);
+  });
+
+  it('continues yesterday’s streak and resets one that was broken', async () => {
+    const user = await startLearning('learner', 'learner', 0);
+    put('users/learner', { ...records.get('users/learner'), streak: 3, lastActiveDate: day(-1) });
+    await toggleLessonContentDone(user, lesson, 'video');
+    expect(records.get('users/learner')).toMatchObject({ streak: 4, lastActiveDate: day() });
+
+    put('users/learner', { ...records.get('users/learner'), streak: 9, lastActiveDate: day(-3) });
+    await toggleLessonContentDone(user, lesson, 'pdf');
+    expect(records.get('users/learner')).toMatchObject({ streak: 1, lastActiveDate: day() });
+  });
+
+  it('un-ticking a material or a refresh does not count as learning', async () => {
+    const user = await startLearning('learner', 'learner', 3);
+    await toggleLessonContentDone(user, lesson, 'video');
+    put('users/learner', { ...records.get('users/learner'), streak: 2, lastActiveDate: day(-1) });
+    await toggleLessonContentDone(user, lesson, 'video');
+    await refreshLessonProgress(user, 'lesson');
+    expect(records.get('users/learner')).toMatchObject({ streak: 2, lastActiveDate: day(-1) });
+  });
+});
 it('concurrent answers persist without lost submissions or repeated completion awards', async () => {
   const user = await startLearning();
   await toggleLessonContentDone(user, lesson, 'video');

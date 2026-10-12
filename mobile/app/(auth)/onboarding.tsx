@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { BrandBackdrop } from '@/components/ui/BrandBackdrop';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Chip } from '@/components/ui/Chip';
@@ -21,7 +22,7 @@ import {
   type Level,
   type SkillTag,
 } from '@/constants/skills';
-import { colors, radius, sizes, spacing, type } from '@/constants/theme';
+import { brand, colors, radius, sizes, spacing, type } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { completeOnboarding, logout } from '@/services/authService';
 import type { UserRole } from '@/types';
@@ -34,24 +35,33 @@ const ROLE_OPTIONS: {
   title: string;
   description: string;
   icon: keyof typeof Ionicons.glyphMap;
+  /** Logo colour for the icon circle, so the three choices read apart at a glance. */
+  color: string;
+  surface: string;
 }[] = [
   {
     value: 'both',
     title: 'Both',
     description: 'Teach what you know and learn what you don\u2019t. Most members pick this.',
     icon: 'swap-horizontal',
+    color: colors.accent,
+    surface: colors.accentSurface,
   },
   {
     value: 'learner',
     title: 'Mostly learning',
     description: 'Browse lessons and book sessions with peers.',
     icon: 'school-outline',
+    color: brand.blue,
+    surface: brand.blueSurface,
   },
   {
     value: 'teacher',
     title: 'Mostly teaching',
     description: 'Publish lessons and host sessions for others.',
     icon: 'easel-outline',
+    color: brand.green,
+    surface: brand.greenSurface,
   },
 ];
 
@@ -182,6 +192,7 @@ export default function OnboardingScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+      <BrandBackdrop />
       <ScreenHeader
         title={firstName ? `Welcome, ${firstName}` : 'Welcome to SkillBridge'}
         subtitle={`Step ${stepIndex + 1} of ${steps.length}`}
@@ -228,12 +239,8 @@ export default function OnboardingScreen() {
                   accessibilityLabel={`${option.title}. ${option.description}`}
                   style={selected ? styles.roleCardSelected : undefined}>
                   <View style={styles.roleRow}>
-                    <View style={[styles.roleIcon, selected && styles.roleIconSelected]}>
-                      <Ionicons
-                        name={option.icon}
-                        size={sizes.iconMd}
-                        color={selected ? colors.accent : colors.inkMuted}
-                      />
+                    <View style={[styles.roleIcon, { backgroundColor: option.surface }]}>
+                      <Ionicons name={option.icon} size={sizes.iconMd} color={option.color} />
                     </View>
                     <View style={styles.roleText}>
                       <Text style={styles.roleTitle}>{option.title}</Text>
@@ -314,11 +321,11 @@ export default function OnboardingScreen() {
                   accessibilityLabel={option.label}
                   style={selected ? styles.roleCardSelected : undefined}>
                   <View style={styles.roleRow}>
-                    <View style={[styles.roleIcon, selected && styles.roleIconSelected]}>
+                    <View style={[styles.roleIcon, selected && styles.goalIconSelected]}>
                       <Ionicons
-                        name="flag-outline"
+                        name={selected ? 'flag' : 'flag-outline'}
                         size={sizes.iconMd}
-                        color={selected ? colors.accent : colors.inkMuted}
+                        color={selected ? colors.inkInverse : colors.inkMuted}
                       />
                     </View>
                     <View style={styles.roleText}>
@@ -438,6 +445,7 @@ const styles = StyleSheet.create({
   safe: {
     flex: 1,
     backgroundColor: colors.bg,
+    overflow: 'hidden',
   },
   progress: {
     flexDirection: 'row',
@@ -447,9 +455,9 @@ const styles = StyleSheet.create({
   },
   progressBar: {
     flex: 1,
-    height: spacing.xs,
+    height: spacing.sm,
     borderRadius: radius.full,
-    backgroundColor: colors.surfaceAlt,
+    backgroundColor: colors.border,
   },
   progressBarDone: {
     backgroundColor: colors.accent,
@@ -476,6 +484,8 @@ const styles = StyleSheet.create({
   },
   roleCardSelected: {
     borderColor: colors.accent,
+    borderWidth: 2,
+    backgroundColor: colors.accentSurface,
   },
   roleRow: {
     flexDirection: 'row',
@@ -490,8 +500,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  roleIconSelected: {
-    backgroundColor: colors.accentSurface,
+  goalIconSelected: {
+    backgroundColor: colors.accent,
   },
   roleText: {
     flex: 1,

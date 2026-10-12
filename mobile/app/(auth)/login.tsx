@@ -11,11 +11,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { BrandBackdrop } from '@/components/ui/BrandBackdrop';
 import { BrandMark } from '@/components/ui/BrandMark';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Notice } from '@/components/ui/Notice';
-import { colors, spacing, type } from '@/constants/theme';
+import { colors, radius, shadow, spacing, type } from '@/constants/theme';
 import { login } from '@/services/authService';
 import { errorMessage } from '@/utils/authErrors';
 import { validateEmail, validatePassword, type FieldError } from '@/utils/validation';
@@ -50,6 +51,7 @@ export default function LoginScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+      <BrandBackdrop />
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
@@ -60,7 +62,10 @@ export default function LoginScreen() {
           <BrandMark />
 
           <View style={styles.form}>
-            <Text style={styles.heading}>Welcome back</Text>
+            <View style={styles.headingBlock}>
+              <Text style={styles.heading}>Welcome back</Text>
+              <Text style={styles.subheading}>Log in to keep learning and sharing your skills.</Text>
+            </View>
 
             {formError ? <Notice tone="error" message={formError} /> : null}
 
@@ -117,6 +122,7 @@ const styles = StyleSheet.create({
   safe: {
     flex: 1,
     backgroundColor: colors.bg,
+    overflow: 'hidden',
   },
   flex: {
     flex: 1,
@@ -127,12 +133,27 @@ const styles = StyleSheet.create({
     gap: spacing.xl,
     padding: spacing.lg,
   },
+  headingBlock: {
+    gap: spacing.xs,
+  },
   heading: {
     ...type.h1,
     color: colors.ink,
   },
+  subheading: {
+    ...type.body,
+    color: colors.inkMuted,
+  },
   form: {
     gap: spacing.lg,
+    padding: spacing.xl,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: colors.border,
+    borderTopWidth: spacing.xs,
+    borderTopColor: colors.accent,
+    ...shadow.card,
   },
   forgot: {
     alignSelf: 'flex-end',

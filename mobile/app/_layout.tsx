@@ -14,6 +14,7 @@ import { LoadingState } from '@/components/ui/LoadingState';
 import { colors, spacing } from '@/constants/theme';
 import { AuthProvider } from '@/context/AuthContext';
 import { useAuth } from '@/hooks/useAuth';
+import { usePushNotifications } from '@/hooks/usePushNotifications';
 
 registerGlobals();
 
@@ -55,6 +56,12 @@ function RootNavigator() {
       void SplashScreen.hideAsync();
     }
   }, [loading, bootstrapped]);
+
+  // Push notifications start only for a signed-in, onboarded user, and never
+  // block anything — registration failures are swallowed.
+  const pushUid =
+    !loading && firebaseUser && profile?.onboardingComplete === true ? profile.uid : null;
+  usePushNotifications(pushUid, profile?.expoPushToken);
 
   if (!bootstrapped) {
     return (
@@ -134,7 +141,11 @@ function RootNavigator() {
         <Stack.Screen name="booking/calendar" />
         <Stack.Screen name="review/[id]" />
         <Stack.Screen name="review/lesson/[id]" />
+        <Stack.Screen name="progress" />
       </Stack.Protected>
+
+      {/* Public: the register screen links here before an account exists. */}
+      <Stack.Screen name="help" />
 
       <Stack.Screen name="+not-found" options={{ headerShown: true, title: 'Not found' }} />
     </Stack>

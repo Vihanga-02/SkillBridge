@@ -5,11 +5,14 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 
 import { Avatar } from '@/components/ui/Avatar';
 import { BrandHeader } from '@/components/ui/BrandHeader';
+import { HeroPill } from '@/components/ui/HeroPill';
+import { StatTile } from '@/components/ui/StatTile';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { Notice } from '@/components/ui/Notice';
 import { SkillPortfolio } from '@/components/user/SkillPortfolio';
+import { VerifiedExplainer } from '@/components/user/VerifiedExplainer';
 import { brand, colors, radius, shadow, sizes, spacing, type } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { logout } from '@/services/authService';
@@ -18,6 +21,7 @@ import type { UserRole } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
 import { formatDate } from '@/utils/date';
 import { getProfileCompleteness } from '@/utils/profileCompleteness';
+import { currentStreak, localDay } from '@/utils/streak';
 import { nonNegativeCount } from '@/utils/counts';
 
 type IconName = keyof typeof Ionicons.glyphMap;
@@ -72,6 +76,7 @@ export default function MeScreen() {
   if (!profile) return <LoadingState fullScreen label="Loading your profile…" />;
 
   const profileCompleteness = getProfileCompleteness(profile);
+  const streak = currentStreak(profile.streak, profile.lastActiveDate, localDay());
 
   function openCompletenessAction() {
     if (profileCompleteness.nextItem?.destination === 'credentials') {
@@ -135,11 +140,14 @@ export default function MeScreen() {
             <Text style={styles.email}>{profile.email || firebaseUser?.email}</Text>
 
             <View style={styles.pillRow}>
-              <HeaderPill icon="person-outline" label={ROLE_LABEL[profile.role]} />
-              <HeaderPill
+              <HeroPill icon="person-outline" label={ROLE_LABEL[profile.role]} />
+              <HeroPill
                 icon="sparkles-outline"
                 label={`${nonNegativeCount(profile.credits)} credits`}
               />
+              {canLearn && streak > 0 ? (
+                <HeroPill icon="flame" label={`${streak}-day streak`} />
+              ) : null}
             </View>
 
             <View style={styles.headerMeta}>
@@ -157,14 +165,15 @@ export default function MeScreen() {
         {/* Pulled up over the header's bottom edge. */}
         <View style={[styles.padded, styles.statsGrid]}>
           {stats.map((stat) => (
-            <View
+            <StatTile
               key={stat.label}
-              style={[styles.statTile, stats.length > 3 && styles.statTileHalf]}
-              accessibilityLabel={`${stat.label}: ${nonNegativeCount(stat.value)}`}>
-              <IconCircle icon={stat.icon} tint={stat.tint} />
-              <Text style={styles.statValue}>{nonNegativeCount(stat.value)}</Text>
-              <Text style={styles.statLabel}>{stat.label}</Text>
-            </View>
+              label={stat.label}
+              value={stat.value}
+              icon={stat.icon}
+              color={stat.tint.color}
+              surface={stat.tint.surface}
+              half={stats.length > 3}
+            />
           ))}
         </View>
 
@@ -241,6 +250,19 @@ export default function MeScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Account</Text>
           <View style={styles.menu}>
+            {canLearn ? (
+              <MenuRow
+                icon="flame-outline"
+                tint={TINT.green}
+                label="My progress"
+                hint={
+                  streak > 0
+                    ? `${streak}-day learning streak · lessons, minutes and goals`
+                    : 'Lessons, minutes learned, streak and goals'
+                }
+                onPress={() => router.push('/progress' as Href)}
+              />
+            ) : null}
             <MenuRow
               icon="eye-outline"
               tint={TINT.blue}
@@ -283,6 +305,13 @@ export default function MeScreen() {
               label="My bookings"
               hint="Track requests and teaching"
               onPress={() => router.push('/(tabs)/sessions')}
+            />
+            <MenuRow
+              icon="help-buoy-outline"
+              tint={TINT.navy}
+              label="Help & privacy"
+              hint="Guidelines, what “verified” means, your data"
+              onPress={() => router.push('/help' as Href)}
               last
             />
           </View>
@@ -302,10 +331,13 @@ export default function MeScreen() {
             }
           />
           {canTeach && profile.skillsOffered.length > 0 ? (
-            <Text style={styles.muted}>
-              Tap a skill you teach to take its verification test. Passing adds a tick that says
-              SkillBridge tested you — separate from any certificate you upload.
-            </Text>
+            <>
+              <Text style={styles.muted}>
+                Tap a skill you teach to take its verification test. Passing adds a tick that says
+                SkillBridge tested you — separate from any certificate you upload.
+              </Text>
+              <VerifiedExplainer />
+            </>
           ) : null}
         </View>
 
@@ -320,15 +352,6 @@ export default function MeScreen() {
           </Pressable>
         </View>
       </ScrollView>
-    </View>
-  );
-}
-
-function HeaderPill({ icon, label }: { icon: IconName; label: string }) {
-  return (
-    <View style={styles.pill}>
-      <Ionicons name={icon} size={sizes.iconSm} color={brand.yellow} />
-      <Text style={styles.pillText}>{label}</Text>
     </View>
   );
 }
@@ -439,21 +462,6 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingTop: spacing.xs,
   },
-  pill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-    borderRadius: radius.full,
-    backgroundColor: brand.onInk,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: brand.onInkBorder,
-  },
-  pillText: {
-    ...type.label,
-    color: colors.inkInverse,
-  },
   headerMeta: {
     alignItems: 'center',
     gap: spacing.xs,
@@ -472,30 +480,6 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: spacing.md,
     marginTop: -(spacing.xxl + spacing.lg),
-  },
-  statTile: {
-    flex: 1,
-    alignItems: 'center',
-    gap: spacing.xs,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.sm,
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: colors.border,
-    ...shadow.card,
-  },
-  statTileHalf: {
-    flexBasis: '45%',
-  },
-  statValue: {
-    ...type.h1,
-    color: colors.ink,
-  },
-  statLabel: {
-    ...type.caption,
-    color: colors.inkMuted,
-    textAlign: 'center',
   },
   iconCircle: {
     width: sizes.touchMin - spacing.xs,

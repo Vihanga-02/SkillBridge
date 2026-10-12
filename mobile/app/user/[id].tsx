@@ -2,22 +2,28 @@ import { EnrollmentCount } from '@/components/lesson/EnrollmentCount';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ProgressBar } from '@/components/lesson/ProgressBar';
 import { UserReviews } from '@/components/community/UserReviews';
+import { Avatar } from '@/components/ui/Avatar';
+import { BrandHeader } from '@/components/ui/BrandHeader';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Chip } from '@/components/ui/Chip';
 import { ErrorState } from '@/components/ui/ErrorState';
+import { HeroPill } from '@/components/ui/HeroPill';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { Notice } from '@/components/ui/Notice';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
+import { StatTile } from '@/components/ui/StatTile';
+import { profileShareText, shareText } from '@/utils/share';
 import { CredentialsBySkill } from '@/components/user/CredentialsBySkill';
-import { ProfileHeader } from '@/components/user/ProfileHeader';
+import { VerifiedExplainer } from '@/components/user/VerifiedExplainer';
 import { SkillPortfolio } from '@/components/user/SkillPortfolio';
-import { colors, sizes, spacing, type } from '@/constants/theme';
+import { brand, colors, radius, sizes, spacing, type } from '@/constants/theme';
+import { formatRating, plural } from '@/utils/format';
 import { useAuth } from '@/hooks/useAuth';
 import { ensureDirectChat } from '@/services/chatService';
 import { listCredentials, listPublicCredentials } from '@/services/credentialService';
@@ -30,10 +36,17 @@ import {
 import { subscribeToUser } from '@/services/userService';
 import type { Credential, Lesson, LessonEnrollment, User } from '@/types';
 import { errorMessage } from '@/utils/authErrors';
-import { nonNegativeCount } from '@/utils/counts';
+
+type IconName = keyof typeof Ionicons.glyphMap;
+
+const ROLE_LABEL: Record<User['role'], string> = {
+  learner: 'Here to learn',
+  teacher: 'Here to teach',
+  both: 'Teaches and learns',
+};
 
 export default function UserProfileScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, focus } = useLocalSearchParams<{ id: string; focus?: string }>();
   const { profile: me } = useAuth();
 
   const [user, setUser] = useState<User | null>(null);
@@ -53,6 +66,8 @@ export default function UserProfileScreen() {
   const [messageError, setMessageError] = useState<string | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
   const reviewsOffset = useRef(0);
+  const credentialsOffset = useRef(0);
+  const focusedCredentials = useRef(false);
 
   const isOwnProfile = !!me && me.uid === id;
   const viewerCanLearn = me?.role === 'learner' || me?.role === 'both';
@@ -215,63 +230,137 @@ export default function UserProfileScreen() {
     });
   }
 
-  return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScreenHeader title={isOwnProfile ? 'My profile' : 'Profile'} showBack />
+  const canBook = !isOwnProfile && canTeach && me?.role !== 'teacher';
+  const ctaNote = isOwnProfile
+    ? undefined
+    : canTeach && me?.role === 'teacher'
+      ? 'Switch to Teach & learn to book a session.'
+      : canTeach
+        ? undefined
+        : 'This member is not offering sessions yet. You can still send a message.';
+  const ratingCount = user.ratingCount ?? 0;
+  const verifiedCount = (user.verifiedSkills ?? []).length;
+  const credentialCount = user.credentialCount ?? 0;
 
+  // Same stats as before, now as Me-style tiles.
+  const stats: { label: string; value: number; icon: IconName; color: string; surface: string }[] = [
+    { label: 'Taught', value: user.stats?.sessionsTaught ?? 0, icon: 'easel-outline', color: brand.blue, surface: brand.blueSurface },
+    { label: 'Attended', value: user.stats?.sessionsAttended ?? 0, icon: 'people-outline', color: brand.green, surface: brand.greenSurface },
+    ...(isOwnProfile && user.role === 'both'
+      ? [
+          { label: 'Created Lessons', value: teacherLessons.length, icon: 'create-outline' as IconName, color: colors.accent, surface: colors.accentSurface },
+          { label: 'Enrolled Lessons', value: ownEnrolledCount, icon: 'book-outline' as IconName, color: brand.navy, surface: brand.navySurface },
+        ]
+      : [
+          {
+            label: canTeach ? 'Created Lessons' : isOwnProfile ? 'Enrolled Lessons' : 'Completed Lessons',
+            value: canTeach ? teacherLessons.length : isOwnProfile ? ownEnrolledCount : (user.stats?.lessonsCompleted ?? 0),
+            icon: (canTeach ? 'create-outline' : 'book-outline') as IconName,
+            color: colors.accent,
+            surface: colors.accentSurface,
+          },
+        ]),
+  ];
+
+  return (
+    <View style={styles.safe}>
       <ScrollView
         ref={scrollViewRef}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}>
-        <ProfileHeader
-          user={user}
-          isOwnProfile={isOwnProfile}
-          onEdit={() => router.push('/profile/edit')}
-          onBook={
-            !isOwnProfile && canTeach && me?.role !== 'teacher'
-              ? () =>
+        <BrandHeader style={styles.hero}>
+          <View style={styles.topBar}>
+            <HeroButton icon="chevron-back" label="Go back" onPress={() => router.back()} />
+            <Text style={styles.topTitle} accessibilityRole="header">
+              {isOwnProfile ? 'My profile' : 'Profile'}
+            </Text>
+            <HeroButton
+              icon="share-social-outline"
+              label="Share this profile"
+              onPress={() => void shareText(profileShareText(user))}
+            />
+          </View>
+
+          <View style={styles.identity}>
+            <View style={styles.avatarRing}>
+              <Avatar name={user.name} uri={user.avatarUrl || undefined} size="lg" />
+            </View>
+            <Text style={styles.name}>{user.name}</Text>
+            <Text style={styles.roleText}>{ROLE_LABEL[user.role] ?? ''}</Text>
+            {user.bio ? <Text style={styles.bio}>{user.bio}</Text> : null}
+
+            <View style={styles.pillRow}>
+              {ratingCount > 0 ? (
+                <HeroPill
+                  icon="star"
+                  label={`${formatRating(user.ratingAvg ?? 0, ratingCount)} · ${plural(ratingCount, 'review')}`}
+                  onPress={scrollToReviews}
+                  accessibilityLabel={`Rated ${formatRating(user.ratingAvg ?? 0, ratingCount)} from ${plural(ratingCount, 'review')}. Show reviews`}
+                />
+              ) : (
+                <HeroPill icon="star-outline" label="No reviews yet" />
+              )}
+              {user.location ? <HeroPill icon="location-outline" label={user.location} /> : null}
+              {verifiedCount > 0 ? (
+                <HeroPill icon="checkmark-circle" label={plural(verifiedCount, 'verified skill')} />
+              ) : null}
+              {credentialCount > 0 ? (
+                <HeroPill icon="document-text-outline" label={plural(credentialCount, 'credential')} />
+              ) : null}
+            </View>
+          </View>
+        </BrandHeader>
+
+        {/* Pulled up over the header's bottom edge, like Me. */}
+        <View style={[styles.padded, styles.statsGrid]}>
+          {stats.map((stat) => (
+            <StatTile
+              key={stat.label}
+              label={stat.label}
+              value={stat.value}
+              icon={stat.icon}
+              color={stat.color}
+              surface={stat.surface}
+              half={stats.length > 3}
+            />
+          ))}
+        </View>
+
+        <View style={[styles.padded, styles.actionsBlock]}>
+          {isOwnProfile ? (
+            <Button
+              label="Edit profile"
+              variant="secondary"
+              icon="create-outline"
+              onPress={() => router.push('/profile/edit')}
+            />
+          ) : (
+            <View style={styles.actions}>
+              <Button
+                label="Book a session"
+                icon="calendar-outline"
+                onPress={() =>
                   router.push({
                     pathname: '/session/teacher/[id]',
                     params: { id: user.uid, teacherName: user.name },
                   })
-              : undefined
-          }
-          onMessage={!isOwnProfile && me ? () => void openDirectChat() : undefined}
-          onReviewsPress={user.ratingCount > 0 ? scrollToReviews : undefined}
-          messageLoading={messageLoading}
-          ctaDisabledReason={
-            isOwnProfile
-              ? undefined
-              : canTeach && me?.role === 'teacher'
-                ? 'Switch to Teach & learn to book a session.'
-                : canTeach
-                  ? undefined
-                  : 'This member is not offering sessions yet. You can still send a message.'
-          }
-        />
-
-        {messageError ? (
-          <View style={styles.notice}>
-            <Notice tone="error" message={messageError} />
-          </View>
-        ) : null}
-
-        <View style={styles.section}>
-          <Card>
-            {/* Written by Members 2 and 3; Component 1 only displays them. */}
-            <View style={styles.statsRow}>
-              <Stat label="Taught" value={user.stats?.sessionsTaught ?? 0} />
-              <Stat label="Attended" value={user.stats?.sessionsAttended ?? 0} />
-              {!(isOwnProfile && user.role === 'both') ? <Stat
-                label={canTeach ? 'Created Lessons' : isOwnProfile ? 'Enrolled Lessons' : 'Completed Lessons'}
-                value={canTeach ? teacherLessons.length : isOwnProfile ? ownEnrolledCount : (user.stats?.lessonsCompleted ?? 0)}
-              /> : null}
+                }
+                disabled={!canBook}
+                style={styles.actionHalf}
+              />
+              <Button
+                label="Message"
+                variant="secondary"
+                icon="chatbubble-ellipses-outline"
+                onPress={() => void openDirectChat()}
+                loading={messageLoading}
+                disabled={!me}
+                style={styles.actionHalf}
+              />
             </View>
-            {isOwnProfile && user.role === 'both' ? <View style={[styles.statsRow, { marginTop: spacing.lg }]}>
-              <Stat label="Created Lessons" value={teacherLessons.length} />
-              <Stat label="Enrolled Lessons" value={ownEnrolledCount} />
-            </View> : null}
-          </Card>
+          )}
+          {ctaNote ? <Text style={styles.ctaNote}>{ctaNote}</Text> : null}
+          {messageError ? <Notice tone="error" message={messageError} /> : null}
         </View>
 
         <View
@@ -290,10 +379,25 @@ export default function UserProfileScreen() {
             careerGoals={user.careerGoals}
             extraSkillsWanted={user.extraSkillsWanted}
           />
+          {user.skillsOffered.length > 0 ? <VerifiedExplainer /> : null}
         </View>
 
         {canTeach ? (
-          <View style={styles.section}>
+          <View
+            style={styles.section}
+            onLayout={(event) => {
+              credentialsOffset.current = event.nativeEvent.layout.y;
+              // Opened from "View credentials" on a session: jump here once.
+              if (focus === 'credentials' && !focusedCredentials.current) {
+                focusedCredentials.current = true;
+                setTimeout(() => {
+                  scrollViewRef.current?.scrollTo({
+                    y: Math.max(0, credentialsOffset.current - spacing.lg),
+                    animated: true,
+                  });
+                }, 0);
+              }
+            }}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Credentials</Text>
               {canManageCredentials ? (
@@ -467,16 +571,21 @@ export default function UserProfileScreen() {
           Component 1 does not query the lessons, sessions or reviews collections.
         */}
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+/** Round white-on-navy icon button for the header's top bar. */
+function HeroButton({ icon, label, onPress }: { icon: IconName; label: string; onPress: () => void }) {
   return (
-    <View style={styles.stat}>
-      <Text style={styles.statValue}>{nonNegativeCount(value)}</Text>
-      <Text style={[styles.statLabel, { textAlign: 'center' }]}>{label}</Text>
-    </View>
+    <Pressable
+      onPress={onPress}
+      hitSlop={spacing.sm}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={({ pressed }) => [styles.heroButton, pressed && styles.heroButtonPressed]}>
+      <Ionicons name={icon} size={sizes.iconMd} color={colors.inkInverse} />
+    </Pressable>
   );
 }
 
@@ -506,21 +615,86 @@ const styles = StyleSheet.create({
     ...type.h1,
     color: colors.ink,
   },
-  statsRow: {
+  hero: {
+    // Room for the stat tiles to overlap the bottom edge.
+    paddingBottom: spacing.xxl + spacing.xl,
+  },
+  topBar: {
     flexDirection: 'row',
-  },
-  stat: {
-    flex: 1,
     alignItems: 'center',
-    gap: spacing.xs,
+    justifyContent: 'space-between',
   },
-  statValue: {
+  topTitle: {
+    ...type.h2,
+    color: colors.inkInverse,
+  },
+  heroButton: {
+    width: sizes.touchMin,
+    height: sizes.touchMin,
+    borderRadius: radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: brand.onInk,
+  },
+  heroButtonPressed: {
+    backgroundColor: brand.onInkBorder,
+  },
+  identity: {
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  avatarRing: {
+    padding: spacing.xs,
+    borderRadius: radius.full,
+    borderWidth: 3,
+    borderColor: brand.yellow,
+    marginBottom: spacing.xs,
+  },
+  name: {
     ...type.h1,
-    color: colors.ink,
+    color: colors.inkInverse,
+    textAlign: 'center',
   },
-  statLabel: {
+  roleText: {
+    ...type.label,
+    color: colors.inkInverseMuted,
+  },
+  bio: {
+    ...type.body,
+    color: colors.inkInverse,
+    textAlign: 'center',
+  },
+  pillRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingTop: spacing.xs,
+  },
+  padded: {
+    paddingHorizontal: spacing.lg,
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.md,
+    marginTop: -(spacing.xxl + spacing.lg),
+  },
+  actionsBlock: {
+    gap: spacing.sm,
+    paddingTop: spacing.lg,
+  },
+  actions: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  actionHalf: {
+    flex: 1,
+  },
+  ctaNote: {
     ...type.caption,
     color: colors.inkMuted,
+    textAlign: 'center',
   },
   disclaimer: {
     flexDirection: 'row',

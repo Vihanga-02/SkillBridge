@@ -341,6 +341,8 @@ export type Booking = {
   note: string;
   status: BookingStatus;
   cancelReason: string;
+  /** uid of whoever cancelled — tells the notification who to tell. Absent on older bookings. */
+  cancelledBy?: string;
   /** must exist from creation — Member 4's review guard depends on them */
   reviewedByLearner: boolean;
   reviewedByTeacher: boolean;

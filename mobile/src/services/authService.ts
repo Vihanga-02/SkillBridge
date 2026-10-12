@@ -23,6 +23,7 @@ import { careerGoalByTag, type CareerGoalTag } from '@/constants/careerGoals';
 import { ONBOARDING } from '@/constants/config';
 import { skillLabel } from '@/constants/skills';
 import { auth, db } from '@/firebase/config';
+import { clearExpoPushToken } from '@/services/pushTokenStore';
 import { deriveWantedSkills } from '@/services/userService';
 import type { CareerGoal, Level, SkillOffered, SkillTag, SkillWanted, UserRole } from '@/types';
 
@@ -83,7 +84,16 @@ export async function register(
 export const login = (email: string, password: string) =>
   signInWithEmailAndPassword(auth, email.trim(), password);
 
-export const logout = () => signOut(auth);
+/**
+ * Clears this device's push token first — while still signed in, as the rules
+ * require — so a logged-out phone stops receiving the account's notifications.
+ * That step never throws, so logging out always completes.
+ */
+export async function logout(): Promise<void> {
+  const uid = auth.currentUser?.uid;
+  if (uid) await clearExpoPushToken(uid);
+  await signOut(auth);
+}
 
 export const resetPassword = (email: string) => sendPasswordResetEmail(auth, email.trim());
 

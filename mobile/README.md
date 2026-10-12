@@ -58,7 +58,7 @@ Nothing here deploys from CI. Run from `mobile/` on an up-to-date `main`:
 
 | What | File | Deploy |
 |---|---|---|
-| Cloud Functions (LiveKit meeting tokens) | `functions/` | `npx firebase-tools deploy --only functions --project concise-kayak-468613-m9` |
+| Cloud Functions (LiveKit meeting tokens + push notifications) | `functions/` | `npx firebase-tools deploy --only functions --project concise-kayak-468613-m9` |
 | Firestore composite indexes | `firestore.indexes.json` | `npx firebase-tools deploy --only firestore:indexes --project concise-kayak-468613-m9` |
 
 Firestore and Storage **security rules are managed in the Firebase console** (signed-in

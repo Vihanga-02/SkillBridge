@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "648874084547",
+    "project_id": "concise-kayak-468613-m9",
+    "storage_bucket": "concise-kayak-468613-m9.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:648874084547:android:9dd31a394a3c3903bbba76",
+        "android_client_info": {
+          "package_name": "com.sliit.skillbridge.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCOMdFuMChWsSrXj7fSLKtfZasgSjHcSmk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

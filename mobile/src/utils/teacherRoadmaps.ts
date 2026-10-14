@@ -3,6 +3,18 @@ import type { Lesson, LessonEnrollment, TeacherRoadmap, User } from '@/types';
 
 export const canManageRoadmaps = (role: User['role']) => role === 'teacher' || role === 'both';
 export const canLearnRoadmaps = (role: User['role']) => role === 'learner' || role === 'both';
+
+/**
+ * A learner only follows roadmaps for career goals they selected. Enrolling in
+ * a lesson outside those goals is allowed, but it does not pull in its roadmap.
+ * Matched on the goal, not the skill: a roadmap's `skill` is teacher free text.
+ */
+export function isRoadmapInLearnerGoals(
+  roadmap: Pick<TeacherRoadmap, 'careerGoalId'>,
+  user: Pick<User, 'careerGoals'>
+) {
+  return (user.careerGoals ?? []).some(goal => goal.goal === roadmap.careerGoalId);
+}
 export const cleanSkill = (skill: string) => skill.normalize('NFKC').trim().replace(/\s+/g, ' ');
 export const skillKeyFor = (skill: string) => cleanSkill(skill).toLowerCase();
 

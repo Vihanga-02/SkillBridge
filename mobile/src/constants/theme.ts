@@ -32,6 +32,25 @@ export const colors = {
   info: '#1D4ED8',
 } as const;
 
+/**
+ * Logo colours, sampled from `assets/images/logo.png`. Decoration only — hero
+ * shapes, category icons, avatar rings. Buttons and selected states stay `accent`.
+ * `yellow` is too light for icons on light surfaces; use it on `ink` only.
+ */
+export const brand = {
+  blue: '#0071E6',
+  green: '#01A02E',
+  yellow: '#FDBF00',
+  navy: '#002561',
+  /** Light tints behind brand-coloured icons (icon circles, tiles). */
+  blueSurface: '#E6F1FC',
+  greenSurface: '#E6F6EA',
+  navySurface: '#E6EAF1',
+  /** Translucent white for controls sitting on the navy `ink` header. */
+  onInk: 'rgba(255, 255, 255, 0.12)',
+  onInkBorder: 'rgba(255, 255, 255, 0.2)',
+} as const;
+
 export const spacing = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 } as const;
 
 export const radius = { sm: 8, md: 12, lg: 20, full: 999 } as const;
@@ -82,5 +101,5 @@ export const statusColor = {
   cancelled: colors.danger,
 } as const;
 
-export const theme = { colors, spacing, radius, type, shadow, sizes, statusColor };
+export const theme = { colors, brand, spacing, radius, type, shadow, sizes, statusColor };
 export default theme;

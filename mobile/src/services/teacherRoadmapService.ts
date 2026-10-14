@@ -2,7 +2,7 @@ import { collection, doc, getDoc, getDocs, query, runTransaction, serverTimestam
 import { auth, db } from '@/firebase/config';
 import { listEnrollmentsByUser, listLessonsByIds } from '@/services/lessonService';
 import type { Lesson, LessonEnrollment, TeacherRoadmap, User } from '@/types';
-import { canLearnRoadmaps, canManageRoadmaps, roadmapProgress, validateRoadmap, type RoadmapInput } from '@/utils/teacherRoadmaps';
+import { canLearnRoadmaps, canManageRoadmaps, isRoadmapInLearnerGoals, roadmapProgress, validateRoadmap, type RoadmapInput } from '@/utils/teacherRoadmaps';
 
 const roadmapsCol = collection(db, 'teacherRoadmaps');
 function normalize(data: DocumentData, id: string): TeacherRoadmap {
@@ -52,6 +52,8 @@ export async function loadRoadmaps(user: User, mode: 'teach' | 'learn'): Promise
   requireAccount(user);
   if (mode === 'teach' && !canManageRoadmaps(user.role)) throw new Error('Only teachers can manage roadmaps.');
   if (mode === 'learn' && !canLearnRoadmaps(user.role)) throw new Error('Switch to Teach & learn to use learner roadmaps.');
+  // Learner roadmaps follow selected career goals only, so with none there is nothing to look up.
+  if (mode === 'learn' && !(user.careerGoals ?? []).length) return { roadmaps: [], lessons: [], enrollments: [] };
   const enrollments = mode === 'learn' ? await listEnrollmentsByUser(user.uid) : [];
   const rows = new Map<string, TeacherRoadmap>();
   if (mode === 'teach') {
@@ -61,7 +63,11 @@ export async function loadRoadmaps(user: User, mode: 'teach' | 'learn'): Promise
     const ids = [...new Set(enrollments.map(row => row.lessonId))];
     for (let start = 0; start < ids.length; start += 30) {
       const snapshot = await getDocs(query(roadmapsCol, where('lessonIds', 'array-contains-any', ids.slice(start, start + 30))));
-      snapshot.docs.forEach(row => rows.set(row.id, normalize(row.data(), row.id)));
+      // Dropped before lessons load: an enrolled lesson outside the learner's goals shows no roadmap.
+      snapshot.docs.forEach(row => {
+        const roadmap = normalize(row.data(), row.id);
+        if (isRoadmapInLearnerGoals(roadmap, user)) rows.set(row.id, roadmap);
+      });
     }
   }
   const lessons = await listLessonsByIds([...new Set([...rows.values()].flatMap(row => row.lessonIds))]);

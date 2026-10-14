@@ -27,6 +27,7 @@ yarn-debug.*
 yarn-error.*
 expo.stdout.log
 expo.stderr.log
+firebase-debug.log
 
 # macOS
 .DS_Store

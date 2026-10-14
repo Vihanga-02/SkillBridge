@@ -30,7 +30,7 @@ export function LearnerRoadmapHome({ goals, onOpen }: {
     {goals.length === 0 ? <View style={s.card}>
       <Ionicons name="map-outline" size={sizes.iconLg} color={colors.accent} />
       <Text style={s.title}>No learning roadmaps yet</Text>
-      <Text style={s.meta}>Enroll in lessons that are part of a teacher-created roadmap to start your learning journey.</Text>
+      <Text style={s.meta}>Roadmaps for your selected career goals appear here once you enroll in one of their lessons.</Text>
     </View> : null}
     {goals.map(goal => <View key={goal.id} style={s.groups}>
       <View style={s.goal}>

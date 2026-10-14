@@ -10,14 +10,23 @@ type Props = {
   message?: string;
   actionLabel?: string;
   onAction?: () => void;
+  /** Icon colour; defaults to the neutral `inkFaint`. */
+  iconColor?: string;
 };
 
 /** Never leave a list screen blank — an empty state is information, and it is marks. */
-export function EmptyState({ icon = 'sparkles-outline', title, message, actionLabel, onAction }: Props) {
+export function EmptyState({
+  icon = 'sparkles-outline',
+  title,
+  message,
+  actionLabel,
+  onAction,
+  iconColor = colors.inkFaint,
+}: Props) {
   return (
     <View style={styles.wrapper}>
       <View style={styles.iconCircle}>
-        <Ionicons name={icon} size={sizes.iconLg} color={colors.inkFaint} />
+        <Ionicons name={icon} size={sizes.iconLg} color={iconColor} />
       </View>
 
       <Text style={styles.title}>{title}</Text>
